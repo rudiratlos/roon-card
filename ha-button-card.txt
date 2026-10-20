@@ -1,0 +1,25 @@
+type: vertical-stack
+grid_options:
+  columns: full
+cards:
+    card:
+      type: custom:roon-player-card
+      player: media_player.streamer
+      sensor: sensor.roon_auralic_json
+      roon_url: http://10.8.81.11:9330/api/image/
+      bg_aspects_main: ['12by10', '4by3', '16by12', '16by7']
+      bg_aspects_other: ['12by10', '4by3', '16by12', '16by7']
+      bg_interval: 15
+      zoom_seconds: 30
+      cover_fit: contain
+      lyrics_offset: 0.2
+      max_height: 85vh
+      # Attribute names to show as audio format, if your player provides any, e.g. [sample_rate, bit_depth]
+      format_attr: []
+      # Switches: nosongtext, noaspect, nostatus, noformat, nounderline, noscroll, nostale
+      options: []
+    card:
+      type: picture
+      image: /local/icons/roon-logo.png
+      tap_action:
+        action: none

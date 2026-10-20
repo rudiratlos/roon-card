@@ -1,0 +1,13 @@
+{
+  "name": "roon-mqtt-bridge",
+  "version": "1.3.0",
+  "private": true,
+  "main": "app.js",
+  "dependencies": {
+    "mqtt": "^5.0.0",
+    "node-roon-api": "github:RoonLabs/node-roon-api",
+    "node-roon-api-transport": "github:RoonLabs/node-roon-api-transport",
+    "ws": "^8.0.0"
+  }
+}
+

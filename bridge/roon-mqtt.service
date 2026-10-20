@@ -1,0 +1,14 @@
+[Unit]
+Description=Roon to MQTT bridge
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/roon-mqtt.env
+WorkingDirectory=/opt/roon-card/bridge
+ExecStart=/usr/bin/node app.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
