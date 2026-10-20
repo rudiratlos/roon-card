@@ -306,6 +306,7 @@ status sensor holding the bridge status topic; any value other than online switc
 1. Go to **Settings → Devices & Services → MQTT → Configure**.
 2. Under **Listen to a topic** enter `roon/now_playing/#` and click **Start listening**.
 3. Play or skip a track. A message like this appears (shortened):
+For more information, just look at these images <a href="img/mqtt_abo.jpg" target="_blank">mqtt_abo.jpg</a> and <a href="img/mqtt_out.jpg" target="_blank">mqtt_out.jpg</a>.
 
 ```json
 {
