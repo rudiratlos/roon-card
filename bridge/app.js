@@ -1,6 +1,14 @@
 // Roon -> MQTT bridge
-// Publishes now-playing metadata of all Roon zones to MQTT.
+// Publishes now-playing metadata of all Roon zones to MQTT as one JSON message per zone,
+// plus a status topic (<base>/status) describing the state of the bridge.
 // Configuration is read from environment variables or from a .env file (see roon-mqtt.env.example).
+//
+// Status values:
+//   starting           bridge is running, not yet paired with Roon
+//   online             paired with Roon, delivering data
+//   roon_disconnected  connection to the Roon Core was lost (the bridge exits and is restarted by systemd)
+//   error              unexpected error, or not paired within PAIR_TIMEOUT_MS
+//   offline            bridge stopped (clean shutdown, or last will after an unexpected connection loss)
 
 const fs = require('fs');
 const path = require('path');
@@ -38,11 +46,6 @@ function loadEnvFile() {
 }
 const ENV_LOADED_FROM = loadEnvFile();
 
-global.WebSocket = require('ws'); // works around the Node.js WebSocket problem of node-roon-api
-const RoonApi = require('node-roon-api');
-const RoonApiTransport = require('node-roon-api-transport');
-const mqtt = require('mqtt');
-
 // ==================== CONFIGURATION ====================
 const MQTT_BROKER     = process.env.MQTT_BROKER   || 'mqtt://localhost'; // protocol + host of the MQTT broker
 const MQTT_TOPIC      = process.env.MQTT_TOPIC    || 'roon/now_playing'; // base topic
@@ -51,60 +54,119 @@ const MQTT_PASSWORD   = process.env.MQTT_PASSWORD || '';
 const ROON_HOST       = process.env.ROON_HOST     || '127.0.0.1';        // Roon Core host
 const ROON_PORT       = parseInt(process.env.ROON_PORT || '9330', 10);   // Roon Core WebSocket port
 const PAIR_TIMEOUT_MS = parseInt(process.env.PAIR_TIMEOUT_MS || '90000', 10); // restart if not paired in time
+const LOG_LEVEL       = (process.env.LOG_LEVEL || 'info').toLowerCase(); // 'info' or 'debug'
 // =======================================================
 
-// Log unexpected errors with a stack trace, then exit so systemd restarts the service
-process.on('uncaughtException', (e) => {
-  console.error('[-] Uncaught:', (e && e.stack) || e);
-  process.exit(1);
-});
-process.on('unhandledRejection', (e) => {
-  console.error('[-] Unhandled:', (e && e.stack) || e);
-  process.exit(1);
-});
+const STATUS_TOPIC = `${MQTT_TOPIC}/status`;
 
-console.log(ENV_LOADED_FROM
-  ? `[*] Configuration loaded from ${ENV_LOADED_FROM}`
-  : '[*] No .env file found, using environment variables and defaults');
+// ---------- Logging ----------
+// node-roon-api prints every protocol message ("-> REQUEST ...", "<- CONTINUE ...") via console.log.
+// Those lines contain tokens, zone IDs and image keys, so they are dropped unless LOG_LEVEL=debug.
+const rawLog = console.log.bind(console);
+if (LOG_LEVEL !== 'debug') {
+  console.log = (...args) => {
+    const first = typeof args[0] === 'string' ? args[0] : '';
+    if (/^(->|<-)\s/.test(first) || /^ERROR undefined/.test(first)) return;
+    rawLog(...args);
+  };
+}
+const logInfo = (msg) => rawLog(msg);
+const logDebug = (msg) => { if (LOG_LEVEL === 'debug') rawLog(msg); };
 
-let lastImageKey = '';
-let lastArtistKey = '';
+global.WebSocket = require('ws'); // works around the Node.js WebSocket problem of node-roon-api
+const RoonApi = require('node-roon-api');
+const RoonApiTransport = require('node-roon-api-transport');
+const mqtt = require('mqtt');
+
+logInfo(ENV_LOADED_FROM
+  ? `[*] Configuration loaded from ${ENV_LOADED_FROM} (log level: ${LOG_LEVEL})`
+  : `[*] No .env file found, using environment variables and defaults (log level: ${LOG_LEVEL})`);
+
+// ---------- State ----------
+const lastTrack = {};          // last seen track per zone, used to log real changes only (in memory)
 let paired = false;
+let currentStatus = 'starting';
+let shuttingDown = false;
 
-console.log(`[*] Connecting to MQTT broker ${MQTT_BROKER}...`);
+// ---------- MQTT ----------
+logInfo(`[*] Connecting to MQTT broker ${MQTT_BROKER}...`);
 const mqttOptions = {
   connectTimeout: 5000,
-  // Last will: the broker publishes "offline" if the bridge disappears unexpectedly
-  will: { topic: `${MQTT_TOPIC}/status`, payload: 'offline', retain: true }
+  // Last will: the broker publishes "offline" if the connection drops unexpectedly
+  will: { topic: STATUS_TOPIC, payload: 'offline', retain: true }
 };
 if (MQTT_USER) mqttOptions.username = MQTT_USER;
 if (MQTT_PASSWORD) mqttOptions.password = MQTT_PASSWORD;
 const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
 
-mqttClient.on('connect', () => {
-  console.log('[+] MQTT connection established.');
-  mqttClient.publish(`${MQTT_TOPIC}/status`, 'online', { retain: true });
-});
+// Publish the status (retained). Remembers the value so it can be re-published after a reconnect.
+function setStatus(state, cb) {
+  currentStatus = state;
+  if (mqttClient.connected) {
+    mqttClient.publish(STATUS_TOPIC, state, { retain: true }, cb);
+  } else if (cb) {
+    cb();
+  }
+  logDebug(`[*] Status: ${state}`);
+}
 
+// Publish a final status, close MQTT cleanly and exit.
+// A clean close does not trigger the last will, so the final status is published explicitly.
+function shutdown(state, code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  // Safety net: never hang longer than 2 seconds
+  const force = setTimeout(() => process.exit(code), 2000);
+  force.unref();
+
+  setStatus(state, () => {
+    mqttClient.end(false, {}, () => process.exit(code));
+  });
+}
+
+mqttClient.on('connect', () => {
+  logInfo('[+] MQTT connected.');
+  if (!shuttingDown) setStatus(currentStatus); // (re)publish the current state
+});
+mqttClient.on('reconnect', () => logInfo('[*] MQTT reconnecting...'));
+mqttClient.on('close', () => logDebug('[*] MQTT connection closed.'));
 mqttClient.on('error', (err) => {
   console.error('[-] MQTT error:', err.message);
 });
 
+// ---------- Process signals and errors ----------
+// Clean stop (systemctl stop, Ctrl+C): publish "offline", exit with code 0
+process.on('SIGTERM', () => { logInfo('[*] SIGTERM received, shutting down.'); shutdown('offline', 0); });
+process.on('SIGINT',  () => { logInfo('[*] SIGINT received, shutting down.');  shutdown('offline', 0); });
+
+// Unexpected errors: log with stack trace, publish "error", exit so systemd restarts the service
+process.on('uncaughtException', (e) => {
+  console.error('[-] Uncaught:', (e && e.stack) || e);
+  shutdown('error', 1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[-] Unhandled:', (e && e.stack) || e);
+  shutdown('error', 1);
+});
+
+// ---------- Roon ----------
 const roon = new RoonApi({
   extension_id: 'my.cover.fetcher.local',
   display_name: 'Cover Fetcher LOCAL',
-  display_version: '1.3.1',
+  display_version: '1.5.0',
   publisher: 'me',
   email: 'me@example.com',
 
   core_paired: (core) => {
     paired = true;
-    console.log('\n[+] Paired with Roon.');
+    logInfo('[+] Paired with Roon.');
+    setStatus('online');
 
     core.services.RoonApiTransport.subscribe_zones((resp, msg) => {
       // Connection lost: the callback is invoked without a message
       if (resp === 'NetworkError' || !msg) {
-        console.log('[-] Zone subscription ended: ' + resp);
+        logInfo('[-] Zone subscription ended: ' + resp);
         return;
       }
 
@@ -164,14 +226,13 @@ const roon = new RoonApi({
           const artistKeys = np.artist_image_keys || [];
           const artistKey = artistKeys.length > 0 ? artistKeys[0] : '';
 
-          // Log real image changes (in memory only)
-          if (imageKey !== lastImageKey || artistKey !== lastArtistKey) {
-            console.log(`\n[IMAGE CHANGE - ${zoneName.toUpperCase()}]`);
-            console.log(`  Cover:   [${lastImageKey || 'none'}] -> [${imageKey || 'none'}]`);
-            console.log(`  Artist:  [${lastArtistKey || 'none'}] -> [${artistKey || 'none'}]`);
-            console.log(`  Track:   ${trackTitle} - ${artistName}`);
-            lastImageKey = imageKey;
-            lastArtistKey = artistKey;
+          // Log real track/image changes only (no keys at info level)
+          const sig = [trackTitle, artistName, imageKey, artistKeys.join(',')].join('|');
+          if (lastTrack[zoneName] !== sig) {
+            lastTrack[zoneName] = sig;
+            logInfo(`[~] ${zoneName}: ${artistName} - ${trackTitle} ` +
+                    `(cover: ${imageKey ? 'yes' : 'no'}, artist images: ${artistKeys.length})`);
+            logDebug(`    cover key: ${imageKey || 'none'}, artist keys: ${artistKeys.join(', ') || 'none'}`);
           }
 
           // Only raw text properties and image keys; URLs are built by the consumer
@@ -189,19 +250,9 @@ const roon = new RoonApi({
           payload.now_playing = null;
         }
 
-        // Publish the plain data via MQTT
+        // Publish the complete payload as one JSON message
         if (mqttClient.connected) {
           mqttClient.publish(`${MQTT_TOPIC}/${topicClean}`, JSON.stringify(payload), { retain: true });
-          mqttClient.publish(`${MQTT_TOPIC}/${topicClean}/state`, payload.state, { retain: true });
-
-          if (payload.now_playing) {
-            const t = `${MQTT_TOPIC}/${topicClean}`;
-            mqttClient.publish(`${t}/track`, payload.now_playing.track, { retain: true });
-            mqttClient.publish(`${t}/artist`, payload.now_playing.artist, { retain: true });
-            mqttClient.publish(`${t}/album`, payload.now_playing.album, { retain: true });
-            mqttClient.publish(`${t}/image_key`, payload.now_playing.image_key, { retain: true });
-            mqttClient.publish(`${t}/artist_key`, payload.now_playing.artist_key, { retain: true });
-          }
         }
       });
     });
@@ -209,22 +260,21 @@ const roon = new RoonApi({
 
   core_unpaired: () => {
     paired = false;
-    console.log('[-] Connection to the Roon Core lost, restarting via systemd.');
-    setTimeout(() => process.exit(1), 2000);
+    logInfo('[-] Connection to the Roon Core lost, restarting via systemd.');
+    shutdown('roon_disconnected', 1);
   }
 });
 
 // Initialize the required Roon services
 roon.init_services({ required_services: [RoonApiTransport] });
 
-console.log(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
+logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
 roon.ws_connect({ host: ROON_HOST, port: ROON_PORT });
 
 // Watchdog: if not paired within the time limit, exit so systemd restarts the service
 setTimeout(() => {
   if (!paired) {
     console.error(`[-] Not paired after ${PAIR_TIMEOUT_MS / 1000}s, restarting.`);
-    process.exit(1);
+    shutdown('error', 1);
   }
 }, PAIR_TIMEOUT_MS);
-

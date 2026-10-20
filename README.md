@@ -11,7 +11,8 @@ The original Roon Display needs a modern browser and does not run on lightweight
 
 The right side is the original Roon Display, the left side is roon-card. Tapping the cover or the artist image shows the cover enlarged.
 
-![Wall display 1](img/walldisplay_1.jpg) ![Wall display 2](img/walldisplay_2.jpg)
+<img src="img/walldisplay_1.jpg" alt="Wall display 1" width="45%">
+<img src="img/walldisplay_2.jpg" alt="Wall display 2" width="45%">
 
 **Fallback mode:** If the roon bridge does not deliver artwork information (for example because it is stopped), the card keeps working with the data of the regular `media_player` entity. It then shows the cover provided by the player, and the status pill shows `Fallback`.
 
@@ -32,7 +33,7 @@ The card has no dependencies on other cards (no button-card, no card_mod).
 
 1. Open HACS in Home Assistant.
 2. Menu (three dots) → **Custom repositories**.
-3. Add `https://github.com/rudiratlos/roon-card` with the category **Dashboard**.
+3. Add `https://github.com/rudiratlos/roon-card.git` with the category **Dashboard**.
 4. Search for "roon-card", install it and reload your browser.
 
 HACS adds the resource itself. If you added the resource manually before, remove it to avoid loading the card twice.
@@ -41,9 +42,9 @@ HACS adds the resource itself. If you added the resource manually before, remove
 
 ```bash
 cd /config/www/
-wget https://raw.githubusercontent.com/rudiratlos/roon-card/main/roon-card.js
+wget https://raw.githubusercontent.com/rudiratlos/roon-card/refs/heads/main/roon-card.js
 mkdir -p icons
-wget -O icons/roon-logo.png https://raw.githubusercontent.com/rudiratlos/roon-card/main/img/roon-logo.png
+wget -O icons/roon-logo.png https://raw.githubusercontent.com/rudiratlos/roon-card/refs/heads/main/img/roon-logo.png
 ```
 
 ### Add the resource
@@ -78,6 +79,7 @@ Minimal configuration:
 type: custom:roon-player-card
 player: media_player.streamer
 sensor: sensor.roon_auralic_json
+status_sensor: sensor.roon_bridge_status
 roon_url: http://<roon-server-ip>:9330/api/image/
 ```
 
@@ -87,23 +89,32 @@ Full example with all common options:
 type: custom:roon-player-card
 player: media_player.streamer
 sensor: sensor.roon_auralic_json
+status_sensor: sensor.roon_bridge_status
 roon_url: http://<roon-server-ip>:9330/api/image/
-bg_aspects_main: ['12by10', '4by3', '16by12', '16by7']
-bg_aspects_other: ['12by10', '4by3', '16by12', '16by7']
+bg_aspects_main:
+  - 12by10
+  - 4by3
+  - 16by12
+  - 16by7
+bg_aspects_other:
+  - 12by10
+  - 4by3
+  - 16by12
+  - 16by7
 bg_interval: 15
 zoom_seconds: 30
 cover_fit: contain
 lyrics_offset: 0.2
 max_height: 85vh
 format_attr: []
-options: []
+options: [ nosongtext ]
 ```
 
 Replace `player`, `sensor` and `roon_url` with the values of your installation.
 
 ## Showing an image when nothing is playing
 
-The card itself has no idle screen. A common approach is a `conditional` card that shows your picture when the player is neither playing nor paused:
+The card itself has no idle screen. A common approach is a `conditional` card that shows a picture when the player is neither playing nor paused:
 
 ```yaml
 type: vertical-stack
@@ -121,6 +132,7 @@ cards:
       sensor: sensor.roon_auralic_json
       status_sensor: sensor.roon_bridge_status
       roon_url: http://<roon-server-ip>:9330/api/image/
+      options: [ nosongtext ]
   - type: conditional
     conditions:
       - condition: state

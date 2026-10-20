@@ -6,12 +6,13 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.0.0';
+  const VERSION = '2.1.0';
 
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
     player: '',                            // required: media player entity
     sensor: '',                            // optional: bridge sensor with now_playing attributes
+    status_sensor: '',                     // optional: sensor holding the bridge status topic (online/offline/...)
     roon_url: '',                          // optional: base URL of the Roon image API (ending in /api/image/)
     clock_url: '/',                        // URL used for the clock sync (only the Date header is read)
     bg_aspects_main: ['12by10', '4by3'],   // aspect ratios for the first artist
@@ -30,7 +31,7 @@
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
     //   noscroll     no marquee for title/artist/album (use "..." instead)
-    //   nostale      disable the "bridge data is outdated" check
+    //   nostale      disable the "bridge data is outdated" check (title match and bridge status)
     options: [],
     bar_h: 112,                            // height of the bottom bar in px
     pad: 20,                               // horizontal padding of the bottom bar in px
@@ -75,9 +76,22 @@
     return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
   }
 
-  // Sensor data outdated? If the title differs, equal length plus equal artist still counts as a match.
+  // Status published by the bridge. Returns '' if unknown (no sensor, unavailable, unknown).
+  function bridgeStatus(states, c) {
+    if (!c.status_sensor) return '';
+    const e = states[c.status_sensor];
+    if (!e) return '';
+    const s = String(e.state || '').toLowerCase();
+    return (s === 'unavailable' || s === 'unknown') ? '' : s;
+  }
+
+  // Sensor data outdated? A bridge status other than "online" means fallback immediately.
+  // Otherwise, if the title differs, equal length plus equal artist still counts as a match.
   function isStale(states, c, o) {
-    if (o.nostale || !c.sensor) return false;
+    if (o.nostale) return false;
+    const st = bridgeStatus(states, c);
+    if (st && st !== 'online') return true;
+    if (!c.sensor) return false;
     const player = states[c.player];
     if (!player) return false;
     const a = player.attributes || {};
@@ -456,9 +470,10 @@
       const artist = a.media_artist || '';
       const base = imgBase(c);
 
-      // Use bridge data only if it matches the current track, otherwise fall back to the player
+      // Use bridge data only if the bridge is online and the data matches the current track
       const json = (c.sensor && hass.states[c.sensor] && hass.states[c.sensor].attributes) || {};
       const stale = isStale(hass.states, c, o);
+      const bridge = bridgeStatus(hass.states, c);
       const np = stale ? {} : (json.now_playing || {});
       const album = np.album || a.media_album_name || '';
       const names = String(artist).split(' / ').map(function (x) { return x.trim(); }).filter(Boolean);
@@ -477,7 +492,7 @@
         });
       });
 
-      this._d = { stale: stale, names: names, nKeys: keys.length, fmt: fmt, artist: artist, title: title, album: album };
+      this._d = { stale: stale, bridge: bridge, names: names, nKeys: keys.length, fmt: fmt };
 
       // New track: close the cover zoom
       const trackKey = title + '|' + artist;
@@ -553,16 +568,17 @@
       const s = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
       const p = [];
       if (!o.nostatus) {
-        if (!s) {
-          if (d.stale) p.push('Fallback');
-        } else {
+        if (s) {
           if (s.kind === 'artist') {
             p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
             if (!o.noaspect) p.push(s.asp);
           } else {
             p.push('Cover');
           }
-          if (d.stale) p.push('Fallback');
+        }
+        if (d.stale) {
+          p.push('Fallback');
+          if (d.bridge && d.bridge !== 'online') p.push('bridge ' + d.bridge.replace(/_/g, ' '));
         }
         if (d.fmt && !o.noformat) p.push(d.fmt);
       }
@@ -614,9 +630,8 @@
     _marquee() {
       const el = this._el;
       [[el.tw, el.title], [el.sw, el.sub]].forEach(function (pair) {
-        const w = pair[0], e = pair[1];
-        e.style.animation = 'none';
-        w.style.textOverflow = 'ellipsis';
+        pair[1].style.animation = 'none';
+        pair[0].style.textOverflow = 'ellipsis';
       });
       if (this._opts.noscroll) return;
       requestAnimationFrame(() => {
