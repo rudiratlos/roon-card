@@ -339,9 +339,9 @@ This sensor hands all required data to the card. Add it to your Home Assistant c
 mqtt:
   sensor:
     - name: "Roon Bridge Status"
+      unique_id: roon_bridge_status
       state_topic: "roon/now_playing/status"
 
-  sensor:
     - name: "Roon Auralic JSON"
       state_topic: "roon/now_playing/auralic"
       value_template: "{{ value_json.timestamp }}"
@@ -365,4 +365,4 @@ After reloading the MQTT configuration, open **Developer Tools → States** and 
 
 # License
 
-pls. see license file
+MIT
