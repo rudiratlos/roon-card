@@ -228,6 +228,8 @@ sudo chmod 600 /etc/roon-mqtt.env
 sudo nano /etc/roon-mqtt.env
 ```
 
+edit /etc/roon-mqtt.env an set your data that fits your environment. See documentation below.
+
 Enable and start the service:
 
 ```bash
@@ -276,7 +278,6 @@ ROON_PORT=9330
 LOG_LEVEL=info
 ```
 
-Never commit your real `.env` file. The `debug` log contains tokens and image keys, do not post it publicly.
 
 ## Topics
 
@@ -334,8 +335,12 @@ Use the `zone_name` of your streamer for the sensor below.
 
 This sensor hands all required data to the card. Add it to your Home Assistant configuration (`configuration.yaml` or `mqtt.yaml`) and adjust the topic to your zone:
 
-```yaml
+```yaml      
 mqtt:
+  sensor:
+    - name: "Roon Bridge Status"
+      state_topic: "roon/now_playing/status"
+
   sensor:
     - name: "Roon Auralic JSON"
       state_topic: "roon/now_playing/auralic"
