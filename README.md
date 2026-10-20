@@ -1,3 +1,5 @@
+[![PayPal Spendenbutton](https://www.paypalobjects.com/de_DE/DE/i/btn/btn_donateCC_LG.gif)](https://www.paypal.me/donation944610)
+
 # roon-card
 
 A Home Assistant dashboard card and a small bridge that bring a Roon-style "now playing" view to lightweight displays.
