@@ -267,17 +267,34 @@ The bridge reads its settings from environment variables. It looks for a `.env` 
 | `ROON_PORT` | `9330` | WebSocket port of the Roon Core |
 | `PAIR_TIMEOUT_MS` | `90000` | the bridge restarts if it is not paired with Roon within this time |
 | `LOG_LEVEL` | `info` | `info` logs status and track changes, `debug` also logs the complete Roon protocol |
+| `ROON_CORE_IP` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_CORE_HOSTNAME` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_CORE_OS` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_LIBRARY_PATHS` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_INSTALLED_EXTENSIONS` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_CORE_INSTALL_PATH` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `ROON_CORE_NOTES` | optional | attribut can be retrieved from sensor roon_bridge_status |
 
 Example `/etc/roon-mqtt.env`:
 
 ```ini
 MQTT_BROKER=mqtt://homeassistant.local
+MQTT_TOPIC=roon/now_playing
 MQTT_USER=
 MQTT_PASSWORD=
-MQTT_TOPIC=roon/now_playing
+
 ROON_HOST=127.0.0.1
 ROON_PORT=9330
+PAIR_TIMEOUT_MS=90000
 LOG_LEVEL=info
+
+ROON_CORE_IP=192.168.1.20
+ROON_CORE_HOSTNAME=roon.int.yourdomain.com
+ROON_CORE_OS=Linux
+ROON_LIBRARY_PATHS=/Multimedia/Music
+ROON_INSTALLED_EXTENSIONS=Roon ARC,roon-card
+ROON_CORE_INSTALL_PATH=
+ROON_CORE_NOTES=
 ```
 
 
@@ -339,14 +356,17 @@ Use the `zone_name` of your streamer for the sensor below.
 
 This sensor hands all required data to the card. Add it to your Home Assistant configuration (`configuration.yaml` or `mqtt.yaml`) and adjust the topic to your zone:
 
-```yaml      
+```yaml     
 mqtt:
   sensor:
     - name: "Roon Bridge Status"
       unique_id: roon_bridge_status
       state_topic: "roon/now_playing/status"
+      value_template: "{{ value_json.status }}"
+      json_attributes_topic: "roon/now_playing/status"
 
     - name: "Roon Auralic JSON"
+      unique_id: roon_auralic_json
       state_topic: "roon/now_playing/auralic"
       value_template: "{{ value_json.timestamp }}"
       json_attributes_topic: "roon/now_playing/auralic"
