@@ -206,17 +206,74 @@ The Roon image API only delivers plain HTTP. If you open Home Assistant via HTTP
 
 ## What it does
 
-The bridge connects locally to the Roon Core, watches your audio zones and publishes one JSON message per zone to MQTT, whenever something changes. The message contains the playback state, volume and the raw metadata of the current track, including the keys of the cover and artist images. The URLs of the images are built by the card from `roon_url`, so no network address is stored in the bridge data.
+`roon-bridge` is a Node.js service that connects to the Roon Core, monitors its audio zones and publishes playback information to MQTT.
+
+For each zone, the bridge publishes a retained JSON message containing:
+
+- Playback state and transport capabilities
+- Current track, artist, album and playback position
+- Album artwork and artist image keys
+- Output devices, volume and mute state
+- Optional Signal Path information for the currently playing track
+
+The bridge also publishes its operational status, including the bridge version and Roon Core information, to a dedicated MQTT status topic.
+
+## Signal Path support
+
+The bridge includes optional Signal Path support through [`bridge/signal-path.js`](https://github.com/rudiratlos/roon-card/blob/main/bridge/signal-path.js).
+
+When a zone is playing, the module reads the Roon Server log and searches for the most recent Signal Path block matching that zone. Zone matching uses the log context and, as a fallback, the zone or output device names.
+
+The default log location is:
+
+```text
+/var/roon/RoonServer/Logs/RoonServer_log.txt
+```
+
+The log path can be overridden with the `SIGNAL_PATH_LOG` process environment variable.
+
+The module caches parsed log data and reloads it when the file size or modification time changes.
+
+### Signal Path data
+
+The zone payload includes a `signal_path` property. When matching information is available, it can contain:
+
+| Property | Description |
+| --- | --- |
+| `quality` | Overall Signal Path quality |
+| `source_format` | Source format |
+| `sample_rate` | Source sample rate in Hz |
+| `bit_depth` | Source bit depth |
+| `channels` | Number of source channels |
+| `bitrate` | Source bitrate, when available |
+| `source_quality` | Source quality reported by Roon |
+| `lossless` | Whether the source is reported as lossless |
+| `dsp` | DSP name, input/output sample rates and quality |
+| `volume_normalization` | Normalization gain and quality |
+| `digital_volume_db` | Digital volume gain in dB |
+| `bit_depth_processing` | Bit-depth upgrade and truncation information |
+| `raat_device` | RAAT device information |
+| `output` | Output type, quality, subtype and model |
+| `matched_by` | How the zone was matched: `log_context` or `device_name` |
+| `raw` | Original parsed Signal Path block |
+
+Some fields may be `null` when the corresponding information is not present in the log.
+
+Signal Path is optional. If `signal-path.js` is missing or cannot be loaded, the bridge continues to operate without Signal Path data. If no matching block is found, `signal_path` is `null`.
+
+The log must be readable by the user running the bridge. On systems where Roon Server runs under a different user, configure suitable file permissions.
 
 ## Installation (Debian/Ubuntu)
 
-Log in to your Roon server via SSH and make sure Node.js is installed:
+Connect to your Roon server via SSH and install Node.js and npm:
 
 ```bash
 sudo apt update
 sudo apt install -y nodejs npm
-node --version   # 18 or newer is recommended
+node --version
 ```
+
+Node.js 18 or newer is recommended.
 
 Install the bridge:
 
@@ -230,54 +287,57 @@ sudo chmod 600 /etc/roon-mqtt.env
 sudo nano /etc/roon-mqtt.env
 ```
 
-edit /etc/roon-mqtt.env an set your data that fits your environment. See documentation below.
+Configure the MQTT broker and Roon Core connection in `/etc/roon-mqtt.env`.
 
 Enable and start the service:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now roon-mqtt.service
-```
-
-Follow the log:
-
-```bash
 sudo journalctl -u roon-mqtt.service -f
 ```
 
-Finally open the **Roon Remote App** → **Settings → Extensions** and click **Enable** next to "Cover Fetcher LOCAL". Without this step the bridge is not allowed to read your zones.
+Finally, open the Roon Remote app, navigate to **Settings → Extensions**, and enable/pair **Cover Fetcher LOCAL**.
 
-### Update
+### Updating
 
 ```bash
-cd /opt/roon-card && sudo git pull && (cd bridge && sudo npm install) && sudo systemctl restart roon-mqtt
+cd /opt/roon-card
+sudo git pull
+cd bridge
+sudo npm install
+sudo systemctl restart roon-mqtt
 ```
 
 ## Configuration
 
-The bridge reads its settings from environment variables. It looks for a `.env` file in this order: the path in `ENV_FILE`, `.env` next to `app.js`, `/etc/roon-mqtt.env`. Variables already set in the environment (for example by systemd) take precedence.
+The bridge loads environment variables from the first readable file in this order:
+
+1. The file specified by `ENV_FILE`, if set
+2. `.env` in the bridge directory
+3. `/etc/roon-mqtt.env`
+
+Variables already set in the process environment take precedence over values in these files.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `MQTT_BROKER` | `mqtt://localhost` | protocol and host of the MQTT broker |
-| `MQTT_USER` | empty | user name, leave empty if not needed |
-| `MQTT_PASSWORD` | empty | password, leave empty if not needed |
-| `MQTT_TOPIC` | `roon/now_playing` | base topic |
-| `ROON_HOST` | `127.0.0.1` | host of the Roon Core |
-| `ROON_PORT` | `9330` | WebSocket port of the Roon Core |
-| `PAIR_TIMEOUT_MS` | `90000` | the bridge restarts if it is not paired with Roon within this time |
-| `LOG_LEVEL` | `info` | `info` logs status and track changes, `debug` also logs the complete Roon protocol |
-| `ROON_CORE_IP` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_CORE_HOSTNAME` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_CORE_OS` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_LIBRARY_PATHS` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_INSTALLED_EXTENSIONS` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_CORE_INSTALL_PATH` | optional | attribut can be retrieved from sensor roon_bridge_status |
-| `ROON_CORE_NOTES` | optional | attribut can be retrieved from sensor roon_bridge_status |
+| `MQTT_BROKER` | `mqtt://localhost` | MQTT broker URL |
+| `MQTT_USER` | Empty | MQTT username |
+| `MQTT_PASSWORD` | Empty | MQTT password |
+| `MQTT_TOPIC` | `roon/now_playing` | Base topic for zone and status messages |
+| `ROON_HOST` | `127.0.0.1` | Hostname or IP address of the Roon Core |
+| `ROON_PORT` | `9330` | Roon Core WebSocket port |
+| `PAIR_TIMEOUT_MS` | `90000` | Timeout for pairing with the Roon Core |
+| `HEARTBEAT_MS` | `30000` | Interval between status updates, in milliseconds |
+| `LOG_LEVEL` | `info` | Set to `debug` for additional diagnostic output |
+| `IMAGE_URL_BASE` | Empty | Optional base URL for the Roon image API |
+| `SIGNAL_PATH_LOG` | `/var/roon/RoonServer/Logs/RoonServer_log.txt` | Path to the Roon Server log used by Signal Path support |
+
+**Note:** `SIGNAL_PATH_LOG` is read when `signal-path.js` is loaded. In the current implementation, that happens before the bridge loads its `.env` file. To override the path reliably, set `SIGNAL_PATH_LOG` in the process environment before starting Node.js. The default path works without additional configuration when the log is available there.
 
 Example `/etc/roon-mqtt.env`:
 
-```ini
+```dotenv
 MQTT_BROKER=mqtt://homeassistant.local
 MQTT_TOPIC=roon/now_playing
 MQTT_USER=
@@ -286,77 +346,93 @@ MQTT_PASSWORD=
 ROON_HOST=127.0.0.1
 ROON_PORT=9330
 PAIR_TIMEOUT_MS=90000
+HEARTBEAT_MS=30000
 LOG_LEVEL=info
-
-ROON_CORE_IP=192.168.1.20
-ROON_CORE_HOSTNAME=roon.int.yourdomain.com
-ROON_CORE_OS=Linux
-ROON_LIBRARY_PATHS=/Multimedia/Music
-ROON_INSTALLED_EXTENSIONS=Roon ARC,roon-card
-ROON_CORE_INSTALL_PATH=
-ROON_CORE_NOTES=
+IMAGE_URL_BASE=http://192.168.1.20:9330/api/image
 ```
 
+Set `IMAGE_URL_BASE` to the URL reachable by your Home Assistant display browser. If it is unset, consumers must configure their own image URL.
 
-## Topics
-
-| Topic | Content |
-| --- | --- |
-| `roon/now_playing/<zone>` | complete JSON of the zone (retained). `<zone>` is the zone name in lowercase without special characters, for example `auralic` |
-| `roon/now_playing/status` | `online` or `offline` (retained) |
-
-### status
+## MQTT topics
 
 | Topic | Content |
 | --- | --- |
-| starting | roon brige working, but not coupled with roon server |
-| online | coupled with roon server, data will be delivered via mqtt |
-| roon_disconnected | lost connection to roon server, roon bridge will be restarted by systemd |
-| error | unexpected error or no coupling within PAIR_TIMEOUT_MS |
-| offline | roon bridge not running |
+| `roon/now_playing/<zone>` | Retained JSON payload for an individual zone |
+| `roon/now_playing/status` | Retained JSON status of the bridge |
 
-status sensor holding the bridge status topic; any value other than online switches the card to fallback immediately
+The zone name is converted to lowercase and non-alphanumeric characters are removed to form the topic suffix. For example, `Living Room` becomes `livingroom`.
 
+### Bridge status
 
-## Checking the data in Home Assistant
+The status payload includes a status value and timestamp. When available, it also includes the bridge version, image base URL and Roon Core name and version. The status message is refreshed periodically using the configured heartbeat interval.
 
-1. Go to **Settings → Devices & Services → MQTT → Configure**.
-2. Under **Listen to a topic** enter `roon/now_playing/#` and click **Start listening**.
-3. Play or skip a track. A message like this appears (shortened):
+| Status | Meaning |
+| --- | --- |
+| `starting` | The bridge has started but has not yet paired with Roon |
+| `online` | The bridge is paired with Roon and can publish zone data |
+| `roon_disconnected` | The connection to Roon was lost |
+| `error` | An unexpected error occurred or pairing timed out |
+| `offline` | The bridge stopped or disconnected unexpectedly |
+
+The bridge publishes an `offline` Last Will message if its MQTT connection is lost unexpectedly. On a clean shutdown, it publishes the final status before exiting.
+
+## Checking MQTT data in Home Assistant
+
+1. Go to **Settings → Devices & services → MQTT → Configure**.
+2. Subscribe to `roon/now_playing/#`.
+3. Start playback and inspect the message for your zone.
+
+A shortened example of a zone payload:
 
 ```json
 {
-  "zone_id": "160...017a7",
-  "zone_name": "auralic",
+  "zone_id": "example-zone-id",
+  "zone_name": "Living Room",
   "state": "playing",
-  "is_seek_allowed": true,
   "outputs": [
-    { "output_id": "170...017a7", "name": "auralic",
-      "volume": { "type": "number", "min": 0, "max": 100, "value": 68, "step": 1, "is_muted": false } }
+    {
+      "output_id": "example-output-id",
+      "name": "Living Room",
+      "volume": {
+        "type": "number",
+        "min": 0,
+        "max": 100,
+        "value": 68,
+        "step": 1,
+        "is_muted": false
+      }
+    }
   ],
-  "timestamp": "2026-10-17T15:12:56.353Z",
+  "signal_path": {
+    "quality": "Lossless",
+    "source_format": "FLAC",
+    "sample_rate": 44100,
+    "bit_depth": 16,
+    "channels": 2,
+    "lossless": true,
+    "matched_by": "log_context"
+  },
+  "timestamp": "2026-10-21T18:00:00.000Z",
   "now_playing": {
-    "track": "I Remember Clifford [Live at Newport 1957]",
-    "artist": "Dizzy Gillespie / Jon Hendricks / Benny Golson",
-    "album": "Ultimate Dizzy Gillespie",
+    "track": "Example Track",
+    "artist": "Example Artist",
+    "album": "Example Album",
     "seek_position": 0,
-    "length": 291,
-    "image_key": "063fd5...032a",
-    "artist_key": "66c5e7...51b1",
-    "artist_keys": ["66c5e7...51b1", "..."]
+    "length": 240,
+    "image_key": "example-image-key",
+    "artist_key": "example-artist-key",
+    "artist_keys": ["example-artist-key"]
   }
 }
 ```
 
-For more information, just look at these images <a href="img/mqtt_abo.jpg" target="_blank">mqtt_abo.jpg</a> and <a href="img/mqtt_out.jpg" target="_blank">mqtt_out.jpg</a>.
+The Signal Path values above are illustrative. Actual fields depend on the information available in the Roon Server log. If no matching Signal Path block is found, the property is `null`.
 
-Use the `zone_name` of your streamer for the sensor below.
+## MQTT sensors in Home Assistant
 
-## The MQTT sensor
+Add the following sensors to `configuration.yaml` or your MQTT configuration, adjusting the zone topic to match your setup:
 
-This sensor hands all required data to the card. Add it to your Home Assistant configuration (`configuration.yaml` or `mqtt.yaml`) and adjust the topic to your zone:
-
-```yaml     
+```yaml
 mqtt:
   sensor:
     - name: "Roon Bridge Status"
@@ -365,25 +441,24 @@ mqtt:
       value_template: "{{ value_json.status }}"
       json_attributes_topic: "roon/now_playing/status"
 
-    - name: "Roon Auralic JSON"
-      unique_id: roon_auralic_json
-      state_topic: "roon/now_playing/auralic"
+    - name: "Roon Living Room JSON"
+      unique_id: roon_livingroom_json
+      state_topic: "roon/now_playing/livingroom"
       value_template: "{{ value_json.timestamp }}"
-      json_attributes_topic: "roon/now_playing/auralic"
+      json_attributes_topic: "roon/now_playing/livingroom"
 ```
 
-and the following to your configuration.yaml, if you don't want that these sensors fill up your database.
+To avoid filling the Home Assistant database with frequent updates, exclude these entities from the recorder if appropriate for your installation.
 
 ```yaml
 recorder:
   exclude:
     entities:
       - sensor.roon_bridge_status
-      - sensor.roon_auralic_json
+      - sensor.roon_livingroom_json
 ```
 
-
-After reloading the MQTT configuration, open **Developer Tools → States** and search for `sensor.roon_auralic_json`. The state is the timestamp of the last message, and the complete payload is available as attributes.
+After reloading the MQTT configuration, open **Developer Tools → States** and inspect the sensor attributes to see the complete JSON payload.
 
 ---
 
