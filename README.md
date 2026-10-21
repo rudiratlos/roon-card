@@ -372,6 +372,17 @@ mqtt:
       json_attributes_topic: "roon/now_playing/auralic"
 ```
 
+and the following to your configuration.yaml, if you don't want that these sensors fill up your database.
+
+```yaml
+recorder:
+  exclude:
+    entities:
+      - sensor.roon_bridge_status
+      - sensor.roon_auralic_json
+```
+
+
 After reloading the MQTT configuration, open **Developer Tools → States** and search for `sensor.roon_auralic_json`. The state is the timestamp of the last message, and the complete payload is available as attributes.
 
 ---

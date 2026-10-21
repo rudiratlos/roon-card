@@ -6,14 +6,16 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.1.1';
+  const VERSION = '2.2.0';
 
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
     player: '',                            // required: media player entity
-    sensor: '',                            // optional: bridge sensor with now_playing attributes
-    status_sensor: '',                     // optional: sensor holding the bridge status topic (online/offline/...)
-    roon_url: '',                          // optional: base URL of the Roon image API (ending in /api/image/)
+    zone: '',                              // optional: zone name; sensor defaults to sensor.roon_<zone>_json
+    sensor: '',                            // optional: bridge zone sensor (overrides the zone default)
+    status_sensor: '',                     // optional: bridge status sensor (default sensor.roon_bridge_status)
+    roon_url: '',                          // optional: image API base URL (default: image_base_url from the bridge status)
+    heartbeat_timeout: 90,                 // seconds without a new bridge heartbeat before fallback; 0 = off
     clock_url: '/',                        // URL used for the clock sync (only the Date header is read)
     bg_aspects_main: ['12by10', '4by3'],   // aspect ratios for the first artist
     bg_aspects_other: ['12by10'],          // aspect ratios for further artists
@@ -23,7 +25,7 @@
     lyrics: true,                          // false = lyrics off (same as 'nosongtext')
     lyrics_dim: 0.55,                      // dimming of the image behind the lyrics
     lyrics_offset: 0.2,                    // seconds: positive = lyrics earlier, negative = later
-    format_attr: '',                       // attribute name(s) shown as audio format, e.g. [sample_rate, bit_depth]
+    format_attr: '',                       // attribute path(s) shown as audio format; empty = auto from signal_path
     // Switches, e.g. options: [nosongtext, noaspect, nostatus]
     //   nosongtext   lyrics off
     //   noaspect     do not show the aspect ratio in the pill
@@ -31,7 +33,8 @@
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
     //   noscroll     no marquee for title/artist/album (use "..." instead)
-    //   nostale      disable the "bridge data is outdated" check (title match and bridge status)
+    //   nostale      disable the "bridge data is outdated" checks (title, status, heartbeat)
+    //   debug        tap the pill to show a diagnostic panel
     options: [],
     bar_h: 112,                            // height of the bottom bar in px
     pad: 20,                               // horizontal padding of the bottom bar in px
@@ -63,10 +66,24 @@
     return o;
   }
 
-  // Image API base URL with exactly one trailing slash (empty = not configured)
-  function imgBase(c) {
-    const u = String(c.roon_url || '').trim();
-    return u ? u.replace(/\/+$/, '') + '/' : '';
+  // Status published by the bridge (JSON: status, timestamp, image_base_url, ...)
+  function bridgeInfo(states, c) {
+    const e = states[c.status_sensor];
+    if (!e) return { exists: false, status: '', attrs: {} };
+    const s = String(e.state || '').toLowerCase();
+    return {
+      exists: true,
+      status: (s === 'unavailable' || s === 'unknown') ? '' : s,
+      attrs: e.attributes || {}
+    };
+  }
+
+  // Image API base URL with exactly one trailing slash. Option first, then the bridge status.
+  function imageBase(c, bi) {
+    const opt = String(c.roon_url || '').trim();
+    const src = opt ? 'option' : (bi.attrs.image_base_url ? 'bridge' : 'none');
+    const u = opt || String(bi.attrs.image_base_url || '').trim();
+    return { url: u ? u.replace(/\/+$/, '') + '/' : '', src: src };
   }
 
   const nz = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9\u00c0-\u024f]+/g, ''); };
@@ -76,51 +93,48 @@
     return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
   }
 
-  // Status published by the bridge. Returns '' if unknown (no sensor, unavailable, unknown).
-  function bridgeStatus(states, c) {
-    if (!c.status_sensor) return '';
-    const e = states[c.status_sensor];
-    if (!e) return '';
-    const s = String(e.state || '').toLowerCase();
-    return (s === 'unavailable' || s === 'unknown') ? '' : s;
-  }
-
-  // A configured status sensor that does not exist (typo in the entity id)
-  function statusSensorMissing(states, c) {
-    return !!c.status_sensor && !states[c.status_sensor];
-  }
-
-  // Sensor data outdated? A bridge status other than "online" means fallback immediately.
-  // Otherwise, if the title differs, equal length plus equal artist still counts as a match.
-  function isStale(states, c, o) {
-    if (o.nostale) return false;
-    const st = bridgeStatus(states, c);
-    if (st && st !== 'online') return true;
-    if (!c.sensor) return false;
+  // Why is the bridge data not usable? Returns '' if it is usable.
+  function staleReason(states, c, o, bi, silent) {
+    if (o.nostale) return '';
+    if (bi.status && bi.status !== 'online') return 'bridge ' + bi.status.replace(/_/g, ' ');
+    if (silent) return 'bridge silent';
+    if (!c.sensor) return '';
     const player = states[c.player];
-    if (!player) return false;
+    if (!player) return '';
     const a = player.attributes || {};
     const json = (states[c.sensor] && states[c.sensor].attributes) || {};
     const np = json.now_playing || {};
-    if (!np.track) return true;
-    if (sameTrack(np.track, a.media_title)) return false;
+    if (!np.track) return 'no track in sensor';
+    if (sameTrack(np.track, a.media_title)) return '';
     if (np.length && a.media_duration && Math.abs(np.length - a.media_duration) <= 2 &&
-        sameTrack(np.artist, a.media_artist)) return false;
-    return true;
+        sameTrack(np.artist, a.media_artist)) return '';
+    return 'title mismatch';
   }
 
-  // Audio format, only if the player or sensor provides it
+  // Value at a dotted path, e.g. signal_path.sample_rate
+  function getPath(obj, p) {
+    return String(p).split('.').reduce(function (o, k) { return (o === undefined || o === null) ? undefined : o[k]; }, obj);
+  }
+
+  // Audio format: explicit attribute paths, or automatic from the bridge's signal_path
   function formatInfo(c, a, json, np) {
     let names = c.format_attr;
-    if (typeof names === 'string') names = names.split(/[\s,;]+/);
-    if (!Array.isArray(names)) return '';
-    const out = [];
-    names.forEach(function (n) {
-      if (!n) return;
-      const v = [a[n], json[n], np[n]].filter(function (x) { return x !== undefined && x !== null && x !== ''; })[0];
-      if (v !== undefined) out.push(String(v));
-    });
-    return out.join(' ');
+    if (typeof names === 'string') names = names.split(/[\s,;]+/).filter(Boolean);
+    if (Array.isArray(names) && names.length) {
+      const out = [];
+      names.forEach(function (n) {
+        const v = [a, json, np].map(function (src) { return getPath(src, n); })
+          .filter(function (x) { return x !== undefined && x !== null && x !== ''; })[0];
+        if (v !== undefined) out.push(String(v));
+      });
+      return out.join(' ');
+    }
+    const sp = json && json.signal_path;
+    if (sp && sp.sample_rate && sp.bit_depth) {
+      const rate = (Math.round(sp.sample_rate / 100) / 10) + 'k';
+      return (sp.source_format ? String(sp.source_format).toUpperCase() + ' ' : '') + rate + ' ' + sp.bit_depth + 'Bit';
+    }
+    return '';
   }
 
   // ---------- Clock sync: display <-> Home Assistant ----------
@@ -254,12 +268,18 @@
       this._hass = null;
     }
 
-    static getStubConfig() { return { player: 'media_player.example' }; }
+    static getStubConfig() { return { player: 'media_player.example', zone: 'example' }; }
 
     setConfig(config) {
       if (!config || !config.player) throw new Error("Option 'player' is required");
-      this._cfg = Object.assign({}, DEFAULTS, config);
-      this._opts = parseOpts(this._cfg);
+      const cfg = Object.assign({}, DEFAULTS, config);
+      // Conventions: zone "Auralic" -> sensor.roon_auralic_json, status sensor sensor.roon_bridge_status
+      this._statusExplicit = !!config.status_sensor;
+      const slug = String(cfg.zone || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+      if (!cfg.sensor && slug) cfg.sensor = 'sensor.roon_' + slug + '_json';
+      if (!cfg.status_sensor) cfg.status_sensor = 'sensor.roon_bridge_status';
+      this._cfg = cfg;
+      this._opts = parseOpts(cfg);
       this._stopTimers();
       this._build();
       if (this.isConnected) this._startTimers();
@@ -320,9 +340,13 @@
             justify-content:center; text-align:center; line-height:1.25; white-space:normal; overflow-wrap:anywhere;
             color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif; font-size:1.25rem; font-weight:500;
             text-shadow:0 1px 4px rgba(0,0,0,0.7); transition:opacity 0.4s; opacity:0.35; }
-          .pill { position:absolute; right:10px; bottom:10px; display:none; padding:3px 10px; border-radius:999px;
+          .pill { position:absolute; right:10px; bottom:10px; z-index:4; display:none; padding:3px 10px; border-radius:999px;
             background:rgba(0,0,0,0.55); color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif;
             font-size:0.72rem; font-weight:500; letter-spacing:0.02em; pointer-events:none; }
+          .dbg { position:absolute; left:8px; right:8px; top:8px; bottom:40px; z-index:3; display:none; overflow:auto;
+            box-sizing:border-box; padding:10px; border-radius:8px; background:rgba(0,0,0,0.82); color:#fff;
+            font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all;
+            cursor:pointer; touch-action:manipulation; }
           .zoom { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); z-index:5; display:none;
             align-items:center; justify-content:center; background:rgba(0,0,0,0.82);
             backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer; touch-action:manipulation; }
@@ -372,6 +396,7 @@
             <div class="bgl" id="bga"></div>
             <div class="bgl" id="bgb"></div>
             <div class="lyr" id="lyr"><div class="lyr-in" id="lyrIn"></div></div>
+            <div class="dbg" id="dbg"></div>
             <div class="pill" id="pill"></div>
           </div>
           <div class="zoom" id="zoom"><div class="zimg" id="zimg"></div></div>
@@ -401,13 +426,14 @@
 
       const $ = (id) => this.shadowRoot.getElementById(id);
       this._el = {
-        bg: $('bg'), bga: $('bga'), bgb: $('bgb'), lyr: $('lyr'), lyrIn: $('lyrIn'), pill: $('pill'),
+        bg: $('bg'), bga: $('bga'), bgb: $('bgb'), lyr: $('lyr'), lyrIn: $('lyrIn'), pill: $('pill'), dbg: $('dbg'),
         zoom: $('zoom'), zimg: $('zimg'), cover: $('cover'), tw: $('tw'), title: $('title'), time: $('time'),
         sw: $('sw'), sub: $('sub'), vol: $('vol'), prev: $('prev'), pp: $('pp'), next: $('next'),
         seek: $('seek'), sbar: $('sbar')
       };
       this._front = this._el.bga;
       this._back = this._el.bgb;
+      if (this._opts.debug) this._el.pill.style.pointerEvents = 'auto';
 
       // State
       this._slides = []; this._bgKey = null; this._bgIdx = 0; this._bgLast = Date.now();
@@ -415,6 +441,8 @@
       this._playing = null; this._lyr = null; this._lyrBuilt = null; this._lyrIdx = -2;
       this._zoom = false; this._zoomUntil = 0; this._zoomKey = null;
       this._volHold = 0; this._volSent = null; this._pos = { base: 0, at: Date.now(), playing: false, dur: 0 };
+      this._hbTs = null; this._hbAt = Date.now(); this._evalAt = 0;
+      this._artFail = false; this._dbgOpen = false;
       this._d = null;
 
       this._bind();
@@ -435,6 +463,16 @@
         const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
         this._svc('media_seek', { seek_position: f * this._pos.dur });
       });
+
+      // Debug panel: tap the pill to open, tap the panel to close
+      const toggleDbg = () => {
+        if (!this._opts.debug) return;
+        this._dbgOpen = !this._dbgOpen;
+        e.dbg.style.display = this._dbgOpen ? 'block' : 'none';
+        this._renderDebug();
+      };
+      onTap(e.pill, toggleDbg);
+      onTap(e.dbg, toggleDbg);
 
       // Volume: send on input (debounced), on change and after releasing the slider
       const vs = e.vol;
@@ -465,21 +503,40 @@
       this._el.zoom.style.display = v ? 'flex' : 'none';
     }
 
+    // Has the bridge heartbeat stopped? Only the change of the timestamp counts, not its value,
+    // so a wrong clock on the display does not matter.
+    _heartbeat(bi) {
+      const to = Number(this._cfg.heartbeat_timeout);
+      const ts = bi.attrs && bi.attrs.timestamp;
+      if (!to || !ts || bi.status !== 'online') {
+        this._hbTs = ts || null;
+        this._hbAt = Date.now();
+        return false;
+      }
+      if (ts !== this._hbTs) { this._hbTs = ts; this._hbAt = Date.now(); }
+      return Date.now() - this._hbAt > to * 1000;
+    }
+
     // ----- Data -> DOM -----
     _update() {
       const c = this._cfg, o = this._opts, el = this._el, hass = this._hass;
+      this._evalAt = Date.now();
       const pl = hass.states[c.player];
       if (!pl) { el.title.textContent = 'Player not found: ' + c.player; return; }
       const a = pl.attributes || {};
       const title = a.media_title || 'Roon ready';
       const artist = a.media_artist || '';
-      const base = imgBase(c);
 
-      // Use bridge data only if the bridge is online and the data matches the current track
+      // Bridge status, heartbeat and whether the bridge data can be used
+      const bi = bridgeInfo(hass.states, c);
+      const silent = this._heartbeat(bi);
+      const reason = staleReason(hass.states, c, o, bi, silent);
+      const stale = !!reason;
+      const ib = imageBase(c, bi);
+      const base = ib.url;
+      const mixed = !!base && location.protocol === 'https:' && base.indexOf('http:') === 0;
+
       const json = (c.sensor && hass.states[c.sensor] && hass.states[c.sensor].attributes) || {};
-      const stale = isStale(hass.states, c, o);
-      const bridge = bridgeStatus(hass.states, c);
-      const statusMissing = statusSensorMissing(hass.states, c);
       const np = stale ? {} : (json.now_playing || {});
       const album = np.album || a.media_album_name || '';
       const names = String(artist).split(' / ').map(function (x) { return x.trim(); }).filter(Boolean);
@@ -498,7 +555,12 @@
         });
       });
 
-      this._d = { stale: stale, bridge: bridge, statusMissing: statusMissing, names: names, nKeys: keys.length, fmt: fmt };
+      this._d = {
+        stale: stale, reason: reason, bi: bi, names: names, nKeys: keys.length, fmt: fmt,
+        base: base, baseSrc: ib.src, mixed: mixed,
+        noUrl: !!c.sensor && !base && !stale && !!np.image_key,
+        statusMissing: this._statusExplicit && !bi.exists
+      };
 
       // New track: close the cover zoom
       const trackKey = title + '|' + artist;
@@ -560,7 +622,15 @@
         this._bgKey = bgKey;
         this._bgIdx = 0;
         this._bgLast = Date.now();
+        this._artFail = false;
         this._showSlide(0, true);
+        // Probe the first artist image once to detect an unreachable image server
+        const probe = slides.filter(function (s) { return s.kind === 'artist'; })[0];
+        if (probe) {
+          const im = new Image();
+          im.onerror = () => { if (bgKey === this._bgKey) { this._artFail = true; this._applyMeta(); } };
+          im.src = probe.u;
+        }
       }
 
       this._updateLyrics(title, artist, album, this._pos.dur);
@@ -582,14 +652,18 @@
             p.push('Cover');
           }
         }
+        if (d.noUrl) p.push('no image url');
+        if (d.mixed) p.push('mixed content');
+        else if (this._artFail) p.push('artwork unreachable');
         if (d.stale) {
           p.push('Fallback');
-          if (d.bridge && d.bridge !== 'online') p.push('bridge ' + d.bridge.replace(/_/g, ' '));
+          if (d.reason.indexOf('bridge') === 0) p.push(d.reason);
         }
         if (d.statusMissing) p.push('status sensor missing');
         if (d.fmt && !o.noformat) p.push(d.fmt);
       }
-      const txt = p.join(' · ');
+      let txt = p.join(' · ');
+      if (o.debug && !txt) txt = 'debug';
       el.pill.textContent = txt;
       el.pill.style.display = txt ? 'block' : 'none';
 
@@ -597,6 +671,38 @@
       el.sub.querySelectorAll('.ra').forEach(function (n) {
         n.style.textDecoration = (parseInt(n.getAttribute('data-i'), 10) === act) ? 'underline' : 'none';
       });
+      if (this._dbgOpen) this._renderDebug();
+    }
+
+    // Diagnostic panel (options: [debug])
+    _renderDebug() {
+      if (!this._dbgOpen) return;
+      const d = this._d, c = this._cfg;
+      if (!d) { this._el.dbg.textContent = 'no data yet'; return; }
+      const a = d.bi.attrs || {};
+      const cur = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
+      const hbAge = a.timestamp ? Math.round((Date.now() - this._hbAt) / 1000) + ' s' : 'n/a';
+      const lines = [
+        'roon-player-card v' + VERSION,
+        '',
+        'player:         ' + c.player,
+        'sensor:         ' + (c.sensor || '(none, player-only mode)'),
+        'status sensor:  ' + c.status_sensor + (d.bi.exists ? '' : '  (NOT FOUND)'),
+        '',
+        'bridge status:  ' + (d.bi.status || '(unknown)'),
+        'bridge version: ' + (a.bridge_version || 'n/a'),
+        'core:           ' + (a.core ? a.core.name + ' ' + a.core.version : 'n/a'),
+        'heartbeat age:  ' + hbAge + ' (limit ' + (Number(c.heartbeat_timeout) || 'off') + ')',
+        'fallback:       ' + (d.stale ? 'YES, ' + d.reason : 'no'),
+        '',
+        'image base:     ' + (d.base || '(none)') + '  [' + d.baseSrc + ']',
+        'page protocol:  ' + location.protocol + (d.mixed ? '  (mixed content!)' : ''),
+        'artwork probe:  ' + (this._artFail ? 'FAILED' : 'ok / not tested'),
+        'slides:         ' + this._slides.length + ' (now: ' + (this._bgIdx + 1) + ')',
+        'current image:  ' + (cur ? cur.u : '(none)'),
+        'format:         ' + (d.fmt || '(none)')
+      ];
+      this._el.dbg.textContent = lines.join('\n');
     }
 
     // ----- Image rotation -----
@@ -681,10 +787,13 @@
       return pos;
     }
 
-    // ----- 250 ms loop: progress, lyrics, rotation, zoom timeout -----
+    // ----- 250 ms loop: progress, lyrics, rotation, zoom timeout, heartbeat re-check -----
     _tick() {
       const el = this._el, c = this._cfg;
       if (!this._hass) return;
+
+      // Re-evaluate every 5 s even without state changes, so a silent bridge is detected
+      if (Date.now() - this._evalAt > 5000) this._update();
 
       // Progress and time
       const dur = this._pos.dur;
