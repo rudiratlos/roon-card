@@ -2,7 +2,7 @@
 // Publishes now-playing metadata of all Roon zones to MQTT as one JSON message per zone,
 // plus a status topic (<base>/status) describing the state of the bridge.
 // Configuration is read from environment variables or from a .env file (see roon-mqtt.env.example).
-//
+
 // Status values:
 //   starting           bridge is running, not yet paired with Roon
 //   online             paired with Roon, delivering data
@@ -30,20 +30,27 @@ function loadEnvFile() {
     } catch (e) {
       continue; // file missing or not readable: try the next one
     }
+
     text.split(/\r?\n/).forEach((line) => {
       const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
       if (!m || line.trim().startsWith('#')) return;
+
       let val = m[2];
+
       // strip matching surrounding quotes
       if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
         val = val.slice(1, -1);
       }
+
       if (process.env[m[1]] === undefined) process.env[m[1]] = val;
     });
+
     return file;
   }
+
   return null;
 }
+
 const ENV_LOADED_FROM = loadEnvFile();
 
 // ==================== CONFIGURATION ====================
@@ -273,10 +280,13 @@ roon.init_services({ required_services: [RoonApiTransport] });
 logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
 roon.ws_connect({ host: ROON_HOST, port: ROON_PORT });
 
-// Watchdog: if not paired within the time limit, exit so systemd restarts the service
+// Watchdog: report missing Roon pairing with an actionable message
 setTimeout(() => {
-  if (!paired) {
-    console.error(`[-] Not paired after ${PAIR_TIMEOUT_MS / 1000}s, restarting.`);
+  if (!paired && !shuttingDown) {
+    console.error(
+      '[-] ERROR: Coupling to Roon Core required via Roon app. ' +
+      'Open Roon Settings > Extensions and enable/pair this bridge.'
+    );
     shutdown('error', 1);
   }
 }, PAIR_TIMEOUT_MS);
