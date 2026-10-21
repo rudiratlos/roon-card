@@ -101,13 +101,13 @@ const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
 
 // Publish the status (retained). Remembers the value so it can be re-published after a reconnect.
 function setStatus(state, cb) {
+  if (state !== currentStatus) logInfo(`[*] Status: ${state}`);
   currentStatus = state;
   if (mqttClient.connected) {
     mqttClient.publish(STATUS_TOPIC, state, { retain: true }, cb);
   } else if (cb) {
     cb();
   }
-  logDebug(`[*] Status: ${state}`);
 }
 
 // Publish a final status, close MQTT cleanly and exit.
@@ -154,7 +154,7 @@ process.on('unhandledRejection', (e) => {
 const roon = new RoonApi({
   extension_id: 'my.cover.fetcher.local',
   display_name: 'Cover Fetcher LOCAL',
-  display_version: '1.5.0',
+  display_version: '1.5.1',
   publisher: 'me',
   email: 'me@example.com',
 
@@ -164,9 +164,11 @@ const roon = new RoonApi({
     setStatus('online');
 
     core.services.RoonApiTransport.subscribe_zones((resp, msg) => {
-      // Connection lost: the callback is invoked without a message
+      // Connection lost: the callback is invoked without a message.
+      // Report it immediately; core_unpaired normally follows and restarts the bridge.
       if (resp === 'NetworkError' || !msg) {
         logInfo('[-] Zone subscription ended: ' + resp);
+        if (!shuttingDown) setStatus('roon_disconnected');
         return;
       }
 

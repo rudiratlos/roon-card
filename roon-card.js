@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.1.0';
+  const VERSION = '2.1.1';
 
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
@@ -83,6 +83,11 @@
     if (!e) return '';
     const s = String(e.state || '').toLowerCase();
     return (s === 'unavailable' || s === 'unknown') ? '' : s;
+  }
+
+  // A configured status sensor that does not exist (typo in the entity id)
+  function statusSensorMissing(states, c) {
+    return !!c.status_sensor && !states[c.status_sensor];
   }
 
   // Sensor data outdated? A bridge status other than "online" means fallback immediately.
@@ -474,6 +479,7 @@
       const json = (c.sensor && hass.states[c.sensor] && hass.states[c.sensor].attributes) || {};
       const stale = isStale(hass.states, c, o);
       const bridge = bridgeStatus(hass.states, c);
+      const statusMissing = statusSensorMissing(hass.states, c);
       const np = stale ? {} : (json.now_playing || {});
       const album = np.album || a.media_album_name || '';
       const names = String(artist).split(' / ').map(function (x) { return x.trim(); }).filter(Boolean);
@@ -492,7 +498,7 @@
         });
       });
 
-      this._d = { stale: stale, bridge: bridge, names: names, nKeys: keys.length, fmt: fmt };
+      this._d = { stale: stale, bridge: bridge, statusMissing: statusMissing, names: names, nKeys: keys.length, fmt: fmt };
 
       // New track: close the cover zoom
       const trackKey = title + '|' + artist;
@@ -580,6 +586,7 @@
           p.push('Fallback');
           if (d.bridge && d.bridge !== 'online') p.push('bridge ' + d.bridge.replace(/_/g, ' '));
         }
+        if (d.statusMissing) p.push('status sensor missing');
         if (d.fmt && !o.noformat) p.push(d.fmt);
       }
       const txt = p.join(' · ');
