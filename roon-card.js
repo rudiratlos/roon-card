@@ -24,9 +24,10 @@
     lyrics_dim: 0.55,                      // dimming of the image behind the lyrics
     lyrics_offset: 0.2,                    // seconds: positive = lyrics earlier, negative = later
     format_attr: '',                       // attribute path(s) shown as audio format; empty = auto from signal_path
-    // Switches, e.g. options: [nosongtext, noaspect, nostatus]
+    // Switches, e.g. options: [nosongtext, noaspect, nosource, nostatus]
     //   nosongtext   lyrics off
     //   noaspect     do not show the aspect ratio in the pill
+    //   nosource     do not show "Artist"/"Cover" (and the aspect ratio) in the pill
     //   nostatus     status pill off
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
@@ -642,7 +643,7 @@
       const s = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
       const p = [];
       if (!o.nostatus) {
-        if (s) {
+        if (s && !o.nosource) {
           if (s.kind === 'artist') {
             p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
             if (!o.noaspect) p.push(s.asp);
