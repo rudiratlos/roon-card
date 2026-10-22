@@ -6,8 +6,6 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.2.1';
-
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
     player: '',                            // required: media player entity
@@ -683,7 +681,7 @@
       const cur = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
       const hbAge = a.timestamp ? Math.round((Date.now() - this._hbAt) / 1000) + ' s' : 'n/a';
       const lines = [
-        'roon-player-card v' + VERSION,
+        'roon-player-card',
         '',
         'player:         ' + c.player,
         'sensor:         ' + (c.sensor || '(none, player-only mode)'),
@@ -851,5 +849,5 @@
     name: 'Roon Player Card',
     description: 'Now-playing card with artist images, lyrics and transport controls'
   });
-  console.info('%c roon-player-card %c v' + VERSION + ' ', 'background:#f29d38;color:#000', 'background:#333;color:#fff');
+  console.info('%c roon-player-card ', 'background:#f29d38;color:#000');
 })();

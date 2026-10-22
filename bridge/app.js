@@ -24,7 +24,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1.6.1';
+// Single source of truth for the bridge version: package.json
+const BRIDGE_VERSION = require('./package.json').version;
 
 // ---------- Optional Signal Path support ----------
 let readSignalPathForZone = null;
