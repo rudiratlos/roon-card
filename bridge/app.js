@@ -118,19 +118,11 @@ const IMAGE_URL_BASE = (process.env.IMAGE_URL_BASE || '').trim().replace(/\/+$/,
 const STATUS_TOPIC = `${MQTT_TOPIC}/status`;
 
 // ---------- Logging ----------
-// node-roon-api prints every protocol message via console.log; those lines contain tokens,
-// zone IDs and image keys, so they are dropped unless LOG_LEVEL=debug.
+// node-roon-api prints every protocol message (tokens, zone IDs, image keys) through its own
+// logger. That logger is switched off via the RoonApi option log_level ('none') unless
+// LOG_LEVEL=debug, in which case it prints everything ('all').
 const rawLog = console.log.bind(console);
-
-if (LOG_LEVEL !== 'debug') {
-  console.log = (...args) => {
-    const first = typeof args[0] === 'string' ? args[0] : '';
-
-    if (/^(->|<-)\s/.test(first) || /^ERROR undefined/.test(first)) return;
-
-    rawLog(...args);
-  };
-}
+const ROON_API_LOG_LEVEL = LOG_LEVEL === 'debug' ? 'all' : 'none';
 
 const logInfo = (msg) => rawLog(msg);
 
@@ -263,6 +255,7 @@ process.on('unhandledRejection', (e) => {
 
 // ---------- Roon ----------
 const roon = new RoonApi({
+  log_level: ROON_API_LOG_LEVEL,
   extension_id: 'my.cover.fetcher.local',
   display_name: 'Cover Fetcher LOCAL',
   display_version: BRIDGE_VERSION,
