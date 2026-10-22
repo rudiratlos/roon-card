@@ -24,7 +24,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1.6.0';
+const BRIDGE_VERSION = '1.6.1';
 
 // ---------- Optional Signal Path support ----------
 let readSignalPathForZone = null;

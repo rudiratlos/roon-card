@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '2.2.0';
+  const VERSION = '2.2.1';
 
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
