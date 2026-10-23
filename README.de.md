@@ -1,17 +1,19 @@
+**🌐 [English](https://github.com/rudiratlos/roon-card/blob/main/README.md) | Deutsch**
+
 # roon-card
 
 [![Öffne deine Home-Assistant-Instanz und zeige dieses Repository im Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=rudiratlos&repository=roon-card&category=plugin)
 
-Eine Home-Assistant-Dashboard-Karte und ein Node.js Dienst, die eine Roon-ähnliche "Now Playing"-Ansicht auf einfachen Displays ermöglichen.
+Eine Home-Assistant-Dashboard-Karte und eine kleine Bridge, die eine Roon-ähnliche "Now Playing"-Ansicht auf einfachen Displays ermöglichen.
 
-- **roon-card** ist eine eigene Lovelace-Karte. Sie zeigt Albumcover, wechselnde Künstlerbilder, Titel, Künstler und Album und bietet Steuerung der Lautstärke, Vor- Zurückspulen sowie die Anzeige von Songtexten.
-- **roon-bridge** ist ein kleiner Node.js-Dienst. Er liest den Wiedergabestatus Ihrer Roon-Zonen vom Roon Core und veröffentlicht diesen via MQTT-Broker.
+- **roon-card** ist eine eigene Lovelace-Karte. Sie zeigt Albumcover, wechselnde Künstlerbilder, Titel, Künstler und Album und bietet Transportsteuerung, Lautstärke, Spulen und synchronisierte Songtexte.
+- **roon-bridge** ist ein kleiner Node.js-Dienst. Er liest den Wiedergabestatus deiner Roon-Zonen vom Roon Core und veröffentlicht ihn auf deinem MQTT-Broker.
 
 Das originale Roon Display braucht einen modernen Browser und läuft nicht auf einfachen Displays wie dem Shelly Wall Display. **Diese Karte schon.**
 
 [![Vergleich](https://github.com/rudiratlos/roon-card/raw/main/img/roon-card_vs_roon-display.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/roon-card_vs_roon-display.jpg)
 
-Rechts ist das originale Roon Display, links roon-card. Ein Klick auf das Cover oder das Künstlerbild zeigt das Cover vergrössert.
+Rechts ist das originale Roon Display, links roon-card. Ein Tipp auf das Cover oder das Künstlerbild zeigt das Cover vergrössert.
 
 <p>
   <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_1.jpg" alt="Wall display 1" width="45%">
@@ -64,8 +66,6 @@ Die Einrichtung besteht aus fünf Schritten. Details stehen in den Abschnitten w
 
 ## Voraussetzungen
 
-[#voraussetzungen](#voraussetzungen)
-
 - Home Assistant mit der MQTT-Integration
 - [HACS](https://hacs.xyz) (empfohlen) oder manuelle Installation
 - Roon Core
@@ -78,11 +78,7 @@ Die Karte hat keine Abhängigkeiten zu anderen Karten (kein button-card, kein ca
 
 # Installation von roon-card
 
-[#installation-von-roon-card](#installation-von-roon-card)
-
 ## Über HACS (empfohlen)
-
-[#über-hacs](#über-hacs)
 
 **Direktlink:**
 
@@ -111,8 +107,6 @@ HACS trägt die Ressource selbst ein. Falls du die Ressource früher manuell hin
 
 ## Manuelle Installation
 
-[#manuelle-installation](#manuelle-installation)
-
 ```
 cd /config/www/
 wget https://raw.githubusercontent.com/rudiratlos/roon-card/refs/heads/main/roon-card.js
@@ -121,8 +115,6 @@ wget -O icons/roon-logo.png https://raw.githubusercontent.com/rudiratlos/roon-ca
 ```
 
 ### Ressource hinzufügen
-
-[#ressource-hinzufügen](#ressource-hinzufügen)
 
 YAML-Modus (`configuration.yaml`):
 
@@ -148,8 +140,6 @@ Wenn du die Datei aktualisierst, erhöhe die Zahl hinter `?v=`, damit Browser ni
 ---
 
 # Verwendung
-
-[#verwendung](#verwendung)
 
 Minimale Konfiguration:
 
@@ -192,8 +182,6 @@ Ersetze `player`, `sensor` und `roon_url` durch die Werte deiner Installation.
 
 ## Bild anzeigen, wenn nichts läuft
 
-[#bild-anzeigen-wenn-nichts-läuft](#bild-anzeigen-wenn-nichts-läuft)
-
 Die Karte selbst hat keinen Ruhebildschirm. Üblich ist eine `conditional`-Karte, die ein Bild zeigt, solange der Player weder spielt noch pausiert. Das Beispiel verwendet `/local/icons/roon-logo.png`; bei einer HACS-Installation musst du diese Datei zuerst herunterladen (siehe Hinweis unter [Über HACS](#über-hacs-empfohlen)).
 
 ```
@@ -230,8 +218,6 @@ cards:
 
 ## Konfigurationsoptionen
 
-[#konfigurationsoptionen](#konfigurationsoptionen)
-
 | Name               | Typ     | Standard            | Beschreibung                                                                                                                                  |
 |--------------------|---------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | `type`             | String  |                     | muss `custom:roon-player-card` sein                                                                                                           |
@@ -257,8 +243,6 @@ Die Bildformate werden als `?aspect=...` an die Roon-Bild-API übergeben. Getest
 
 ### Schalter (`options`)
 
-[#schalter-options](#schalter-options)
-
 | Name          | Beschreibung                                                                                                |
 |---------------|-------------------------------------------------------------------------------------------------------------|
 | `nosongtext`  | Songtexte nicht anzeigen                                                                                    |
@@ -271,19 +255,13 @@ Die Bildformate werden als `?aspect=...` an die Roon-Bild-API übergeben. Getest
 
 ### Audioformat (Bittiefe, Abtastrate)
 
-[#audioformat-bittiefe-abtastrate](#audioformat-bittiefe-abtastrate)
-
 Die Roon-Erweiterungs-API liefert weder Abtastrate noch Bittiefe, daher kann die Bridge sie nicht bereitstellen. Hat dein Player oder Sensor solche Attribute, trage ihre Namen in `format_attr` ein. Du findest sie unter **Entwicklerwerkzeuge → Zustände** bei deinem Player. Die Werte werden unverändert angezeigt, z. B. `44100 24`.
 
 ### Songtexte und Datenschutz
 
-[#songtexte-und-datenschutz](#songtexte-und-datenschutz)
-
 Die Songtexte stammen von [LRCLIB](https://lrclib.net). Die Karte sendet den ersten Künstler, Titel, Album und die Dauer des aktuellen Titels vom Browser des Displays an lrclib.net. Nicht jeder Titel hat synchronisierte Texte. Mit `nosongtext` schaltest du das ab.
 
 ### Hinweis zu HTTPS
-
-[#hinweis-zu-https](#hinweis-zu-https)
 
 Die Roon-Bild-API liefert nur unverschlüsseltes HTTP. Öffnest du Home Assistant über HTTPS, blockieren Browser diese Bilder (Mixed Content). Leite die Bilder dann über einen HTTPS-Reverse-Proxy und verwende dessen URL als `roon_url`.
 
@@ -291,11 +269,7 @@ Die Roon-Bild-API liefert nur unverschlüsseltes HTTP. Öffnest du Home Assistan
 
 # roon-bridge
 
-[#roon-bridge](#roon-bridge)
-
 ## Was sie macht
-
-[#was-sie-macht](#was-sie-macht)
 
 `roon-bridge` ist ein Node.js-Dienst, der sich mit dem Roon Core verbindet, dessen Audiozonen überwacht und Wiedergabeinformationen per MQTT veröffentlicht. Sie wird **nicht** über HACS installiert, sondern auf dem Roon-Server (oder einem anderen Linux-Host im selben Netzwerk).
 
@@ -310,8 +284,6 @@ Für jede Zone veröffentlicht die Bridge eine Retained-JSON-Nachricht mit:
 Zusätzlich veröffentlicht die Bridge ihren Betriebsstatus, einschliesslich Bridge-Version und Roon-Core-Informationen, in einem eigenen MQTT-Status-Topic.
 
 ## Signalpfad-Unterstützung
-
-[#signalpfad-unterstützung](#signalpfad-unterstützung)
 
 Die Bridge enthält optionale Signalpfad-Unterstützung über [`bridge/signal-path.js`](https://github.com/rudiratlos/roon-card/blob/main/bridge/signal-path.js).
 
@@ -328,8 +300,6 @@ Der Pfad kann mit der Umgebungsvariable `SIGNAL_PATH_LOG` überschrieben werden.
 Das Modul speichert die ausgewerteten Logdaten zwischen und lädt sie neu, wenn sich Dateigrösse oder Änderungszeit ändern.
 
 ### Signalpfad-Daten
-
-[#signalpfad-daten](#signalpfad-daten)
 
 Die Zonen-Nachricht enthält die Eigenschaft `signal_path`. Sind passende Informationen vorhanden, kann sie enthalten:
 
@@ -359,8 +329,6 @@ Der Signalpfad ist optional. Fehlt `signal-path.js` oder lässt es sich nicht la
 Das Log muss für den Benutzer lesbar sein, unter dem die Bridge läuft. Läuft der Roon Server unter einem anderen Benutzer, müssen passende Dateirechte gesetzt werden.
 
 ## Installation (Debian/Ubuntu)
-
-[#installation-debianubuntu](#installation-debianubuntu)
 
 Per SSH mit dem Roon-Server verbinden und Node.js sowie npm installieren:
 
@@ -398,8 +366,6 @@ Zum Schluss die Roon-Remote-App öffnen, zu **Einstellungen → Erweiterungen** 
 
 ### Aktualisieren
 
-[#aktualisieren](#aktualisieren)
-
 ```
 cd /opt/roon-card
 sudo git pull
@@ -409,8 +375,6 @@ sudo systemctl restart roon-mqtt
 ```
 
 ## Konfiguration
-
-[#konfiguration](#konfiguration)
 
 Die Bridge lädt Umgebungsvariablen aus der ersten lesbaren Datei in dieser Reihenfolge:
 
@@ -456,8 +420,6 @@ Setze `IMAGE_URL_BASE` auf die URL, die der Browser deines Home-Assistant-Displa
 
 ## MQTT-Topics
 
-[#mqtt-topics](#mqtt-topics)
-
 | Topic                     | Inhalt                                      |
 |---------------------------|---------------------------------------------|
 | `roon/now_playing/<zone>` | Retained-JSON-Nachricht einer einzelnen Zone |
@@ -466,8 +428,6 @@ Setze `IMAGE_URL_BASE` auf die URL, die der Browser deines Home-Assistant-Displa
 Der Zonenname wird in Kleinbuchstaben umgewandelt und alle nicht alphanumerischen Zeichen werden entfernt, daraus entsteht das Topic-Suffix. Beispiel: `Living Room` wird zu `livingroom`.
 
 ### Bridge-Status
-
-[#bridge-status](#bridge-status)
 
 Die Status-Nachricht enthält einen Statuswert und einen Zeitstempel. Falls verfügbar, enthält sie ausserdem Bridge-Version, Bild-Basis-URL sowie Name und Version des Roon Core. Die Statusnachricht wird periodisch im konfigurierten Heartbeat-Intervall erneuert.
 
@@ -482,8 +442,6 @@ Die Status-Nachricht enthält einen Statuswert und einen Zeitstempel. Falls verf
 Bei unerwartetem Verlust der MQTT-Verbindung veröffentlicht der Broker die Last-Will-Nachricht `offline`. Bei einem sauberen Beenden sendet die Bridge den letzten Status selbst, bevor sie sich beendet.
 
 ## MQTT-Daten in Home Assistant prüfen
-
-[#mqtt-daten-in-home-assistant-prüfen](#mqtt-daten-in-home-assistant-prüfen)
 
 1. **Einstellungen → Geräte & Dienste → MQTT → Konfigurieren** öffnen.
 2. `roon/now_playing/#` abonnieren.
@@ -537,8 +495,6 @@ Die Signalpfad-Werte oben sind Beispiele. Welche Felder tatsächlich vorhanden s
 
 ## MQTT-Sensoren in Home Assistant
 
-[#mqtt-sensoren-in-home-assistant](#mqtt-sensoren-in-home-assistant)
-
 Füge die folgenden Sensoren in `configuration.yaml` oder deiner MQTT-Konfiguration hinzu und passe das Zonen-Topic an dein Setup an:
 
 ```
@@ -573,8 +529,6 @@ Nach dem Neuladen der MQTT-Konfiguration unter **Entwicklerwerkzeuge → Zustän
 
 # Fehlerbehebung
 
-[#fehlerbehebung](#fehlerbehebung)
-
 | Problem                                          | Wahrscheinliche Ursache                                                                                                                                                                      |
 |--------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | "Custom element doesn't exist: roon-player-card" | die Ressource fehlt, hat den falschen Typ (muss `module` sein) oder der Browser nutzt eine zwischengespeicherte Version. `?v=` erhöhen und neu laden. Mit HACS: Browser hart neu laden       |
@@ -587,7 +541,5 @@ Nach dem Neuladen der MQTT-Konfiguration unter **Entwicklerwerkzeuge → Zustän
 | Bridge startet nicht                             | `sudo journalctl -u roon-mqtt.service -n 50`. Prüfen, ob die Erweiterung in Roon aktiviert ist und ob die Broker-Einstellungen in `/etc/roon-mqtt.env` stimmen                                |
 
 # Lizenz
-
-[#lizenz](#lizenz)
 
 MIT
