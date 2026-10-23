@@ -13,7 +13,10 @@ Das originale Roon Display braucht einen modernen Browser und läuft nicht auf e
 
 Rechts ist das originale Roon Display, links roon-card. Ein Klick auf das Cover oder das Künstlerbild zeigt das Cover vergrössert.
 
-[![Wall Display 1](https://github.com/rudiratlos/roon-card/raw/main/img/walldisplay_1.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_1.jpg) [![Wall Display 2](https://github.com/rudiratlos/roon-card/raw/main/img/walldisplay_2.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_2.jpg)
+<p>
+  <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_1.jpg" alt="Wall display 1" width="45%">
+  <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_2.jpg" alt="Wall display 2" width="45%">
+</p>
 
 **Fallback-Modus:** Liefert die Roon-Bridge keine Bildinformationen (z. B. weil sie gestoppt ist), arbeitet die Karte weiter mit den Daten der normalen `media_player`-Entität. Sie zeigt dann das vom Player gelieferte Cover, und die Statusanzeige zeigt `Fallback`.
 

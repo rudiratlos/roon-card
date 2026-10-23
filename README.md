@@ -13,7 +13,10 @@ The original Roon Display needs a modern browser and does not run on lightweight
 
 The right side is the original Roon Display, the left side is roon-card. Tapping the cover or the artist image shows the cover enlarged.
 
-[![Wall display 1](https://github.com/rudiratlos/roon-card/raw/main/img/walldisplay_1.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_1.jpg) [![Wall display 2](https://github.com/rudiratlos/roon-card/raw/main/img/walldisplay_2.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_2.jpg)
+<p>
+  <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_1.jpg" alt="Wall display 1" width="45%">
+  <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_2.jpg" alt="Wall display 2" width="45%">
+</p>
 
 **Fallback mode:** If the roon bridge does not deliver artwork information (for example because it is stopped), the card keeps working with the data of the regular `media_player` entity. It then shows the cover provided by the player, and the status pill shows `Fallback`.
 
