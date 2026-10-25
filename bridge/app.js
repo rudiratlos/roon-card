@@ -26,7 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1.6.2';
+const BRIDGE_VERSION = '1.6.4';
 
 // ---------- Optional Signal Path support ----------
 let readSignalPathForZone = null;
@@ -51,6 +51,18 @@ if (fs.existsSync(signalPathFile)) {
   }
 } else {
   console.log('[*] signal-path.js not found; Signal Path support disabled.');
+}
+
+// ---------- Optional web page (standalone card without Home Assistant) ----------
+// Loaded if ./web.js exists. It only starts if WEB_PORT is set.
+let web = null;
+const webFile = path.join(__dirname, 'web.js');
+if (fs.existsSync(webFile)) {
+  try {
+    web = require(webFile);
+  } catch (err) {
+    console.warn('[!] Web page disabled; could not load web.js:', err.message);
+  }
 }
 
 // ---------- Minimal .env loader (no extra dependency) ----------
@@ -104,6 +116,8 @@ const ROON_PORT = parseInt(process.env.ROON_PORT || '9330', 10);
 const PAIR_HINT_MS = parseInt(process.env.PAIR_HINT_MS || '15000', 10);
 const HEARTBEAT_MS = parseInt(process.env.HEARTBEAT_MS || '30000', 10);
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
+// Port of the optional web page (0 or empty = off), e.g. WEB_PORT=8080
+const WEB_PORT = parseInt(process.env.WEB_PORT || '0', 10);
 // Base URL of the Roon image API as reachable by the browsers, e.g. http://192.168.1.10:9330/api/image
 const IMAGE_URL_BASE = (process.env.IMAGE_URL_BASE || '').trim().replace(/\/+$/, '');
 // =======================================================
@@ -136,6 +150,9 @@ logInfo(
     ? `[*] Configuration loaded from ${ENV_LOADED_FROM} (log level: ${LOG_LEVEL})`
     : `[*] No .env file found, using environment variables and defaults (log level: ${LOG_LEVEL})`
 );
+if (web && WEB_PORT) {
+  web.start({ port: WEB_PORT, appDir: __dirname, log: logInfo });
+}
 if (!IMAGE_URL_BASE) {
   logInfo('[!] IMAGE_URL_BASE is not set; consumers need their own image URL setting.');
 }
@@ -181,6 +198,7 @@ function setStatus(state, cb) {
     logInfo(`[*] Status: ${state}`);
   }
   currentStatus = state;
+  if (web) web.pushStatus(statusPayload(state));
   if (mqttClient.connected) {
     mqttClient.publish(STATUS_TOPIC, statusPayload(state), { retain: true }, cb);
   } else if (cb) {
@@ -190,7 +208,9 @@ function setStatus(state, cb) {
 
 // Heartbeat: re-publish the current status with a fresh timestamp
 const heartbeatTimer = setInterval(() => {
-  if (shuttingDown || !mqttClient.connected) return;
+  if (shuttingDown) return;
+  if (web) web.pushStatus(statusPayload(currentStatus));
+  if (!mqttClient.connected) return;
   mqttClient.publish(STATUS_TOPIC, statusPayload(currentStatus), { retain: true });
 }, HEARTBEAT_MS);
 
@@ -248,6 +268,7 @@ const roon = new RoonApi({
     coreInfo = { name: core.display_name, version: core.display_version };
     logInfo('[+] Paired with Roon.');
     setStatus('online');
+    if (web) web.setTransport(core.services.RoonApiTransport);
 
     core.services.RoonApiTransport.subscribe_zones((resp, msg) => {
       if (resp === 'NetworkError' || !msg) {
@@ -369,6 +390,9 @@ const roon = new RoonApi({
           payload.now_playing = null;
         }
 
+        // Optional web page (independent of MQTT)
+        if (web) web.pushZone(payload);
+
         // Publish the complete payload as one JSON message
         if (mqttClient.connected) {
           mqttClient.publish(
@@ -383,6 +407,7 @@ const roon = new RoonApi({
 
   core_unpaired: () => {
     paired = false;
+    if (web) web.setTransport(null);
     logInfo('[-] Connection to the Roon Core lost, restarting via systemd.');
     shutdown('roon_disconnected', 1);
   }
