@@ -12,20 +12,21 @@
 //
 // Status values:
 //   starting           bridge is running, not yet paired with Roon
+//   pairing_required   still not paired after PAIR_HINT_MS: the extension has to be enabled in
+//                      the Roon app (Settings > Extensions). The bridge keeps running and waits.
 //   online             paired with Roon, delivering data
 //   roon_disconnected  connection to the Roon Core was lost (the bridge exits and is restarted by systemd)
-//   error              unexpected error, or not paired within PAIR_TIMEOUT_MS
+//   error              unexpected error
 //   offline            bridge stopped (clean shutdown, or last will after an unexpected connection loss)
 //
 // Signal Path support is optional:
-// - If ./signal-path.js exists and loads successfully, Signal Path data is included.
-// - If it is missing or fails to load, the bridge continues without Signal Path data.
+//   - If ./signal-path.js exists and loads successfully, Signal Path data is included.
+//   - If it is missing or fails to load, the bridge continues without Signal Path data.
 
 const fs = require('fs');
 const path = require('path');
 
-// Single source of truth for the bridge version: package.json
-const BRIDGE_VERSION = require('./package.json').version;
+const BRIDGE_VERSION = '1.6.2';
 
 // ---------- Optional Signal Path support ----------
 let readSignalPathForZone = null;
@@ -34,7 +35,6 @@ const signalPathFile = path.join(__dirname, 'signal-path.js');
 if (fs.existsSync(signalPathFile)) {
   try {
     const signalPathModule = require(signalPathFile);
-
     if (typeof signalPathModule.readSignalPathForZone === 'function') {
       readSignalPathForZone = signalPathModule.readSignalPathForZone;
       console.log('[+] Signal Path support enabled.');
@@ -65,37 +65,29 @@ function loadEnvFile() {
 
   for (const file of candidates) {
     let text;
-
     try {
       text = fs.readFileSync(file, 'utf8');
     } catch (e) {
       continue;
     }
-
     text.split(/\r?\n/).forEach((line) => {
       const m = line.match(
         /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/
       );
-
       if (!m || line.trim().startsWith('#')) return;
-
       let val = m[2];
-
       if (
         (val.startsWith('"') && val.endsWith('"')) ||
         (val.startsWith("'") && val.endsWith("'"))
       ) {
         val = val.slice(1, -1);
       }
-
       if (process.env[m[1]] === undefined) {
         process.env[m[1]] = val;
       }
     });
-
     return file;
   }
-
   return null;
 }
 
@@ -108,7 +100,8 @@ const MQTT_USER = process.env.MQTT_USER || '';
 const MQTT_PASSWORD = process.env.MQTT_PASSWORD || '';
 const ROON_HOST = process.env.ROON_HOST || '127.0.0.1';
 const ROON_PORT = parseInt(process.env.ROON_PORT || '9330', 10);
-const PAIR_TIMEOUT_MS = parseInt(process.env.PAIR_TIMEOUT_MS || '90000', 10);
+// Time without pairing after which the status switches to "pairing_required"
+const PAIR_HINT_MS = parseInt(process.env.PAIR_HINT_MS || '15000', 10);
 const HEARTBEAT_MS = parseInt(process.env.HEARTBEAT_MS || '30000', 10);
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
 // Base URL of the Roon image API as reachable by the browsers, e.g. http://192.168.1.10:9330/api/image
@@ -118,20 +111,22 @@ const IMAGE_URL_BASE = (process.env.IMAGE_URL_BASE || '').trim().replace(/\/+$/,
 const STATUS_TOPIC = `${MQTT_TOPIC}/status`;
 
 // ---------- Logging ----------
-// node-roon-api prints every protocol message (tokens, zone IDs, image keys) through its own
-// logger. That logger is switched off via the RoonApi option log_level ('none') unless
-// LOG_LEVEL=debug, in which case it prints everything ('all').
+// node-roon-api prints every protocol message via console.log; those lines contain tokens,
+// zone IDs and image keys, so they are dropped unless LOG_LEVEL=debug.
 const rawLog = console.log.bind(console);
-const ROON_API_LOG_LEVEL = LOG_LEVEL === 'debug' ? 'all' : 'none';
-
+if (LOG_LEVEL !== 'debug') {
+  console.log = (...args) => {
+    const first = typeof args[0] === 'string' ? args[0] : '';
+    if (/^(->|<-)\s/.test(first) || /^ERROR undefined/.test(first)) return;
+    rawLog(...args);
+  };
+}
 const logInfo = (msg) => rawLog(msg);
-
 const logDebug = (msg) => {
   if (LOG_LEVEL === 'debug') rawLog(msg);
 };
 
 global.WebSocket = require('ws');
-
 const RoonApi = require('node-roon-api');
 const RoonApiTransport = require('node-roon-api-transport');
 const mqtt = require('mqtt');
@@ -141,7 +136,6 @@ logInfo(
     ? `[*] Configuration loaded from ${ENV_LOADED_FROM} (log level: ${LOG_LEVEL})`
     : `[*] No .env file found, using environment variables and defaults (log level: ${LOG_LEVEL})`
 );
-
 if (!IMAGE_URL_BASE) {
   logInfo('[!] IMAGE_URL_BASE is not set; consumers need their own image URL setting.');
 }
@@ -176,7 +170,6 @@ const mqttOptions = {
     retain: true
   }
 };
-
 if (MQTT_USER) mqttOptions.username = MQTT_USER;
 if (MQTT_PASSWORD) mqttOptions.password = MQTT_PASSWORD;
 
@@ -187,9 +180,7 @@ function setStatus(state, cb) {
   if (state !== currentStatus) {
     logInfo(`[*] Status: ${state}`);
   }
-
   currentStatus = state;
-
   if (mqttClient.connected) {
     mqttClient.publish(STATUS_TOPIC, statusPayload(state), { retain: true }, cb);
   } else if (cb) {
@@ -207,13 +198,10 @@ const heartbeatTimer = setInterval(() => {
 // A clean close does not trigger the last will, so the final status is published explicitly.
 function shutdown(state, code) {
   if (shuttingDown) return;
-
   shuttingDown = true;
   clearInterval(heartbeatTimer);
-
   const force = setTimeout(() => process.exit(code), 2000);
   force.unref();
-
   setStatus(state, () => {
     mqttClient.end(false, {}, () => process.exit(code));
   });
@@ -221,13 +209,10 @@ function shutdown(state, code) {
 
 mqttClient.on('connect', () => {
   logInfo('[+] MQTT connected.');
-
   if (!shuttingDown) setStatus(currentStatus);
 });
-
 mqttClient.on('reconnect', () => logInfo('[*] MQTT reconnecting...'));
 mqttClient.on('close', () => logDebug('[*] MQTT connection closed.'));
-
 mqttClient.on('error', (err) => {
   console.error('[-] MQTT error:', err.message);
 });
@@ -237,17 +222,14 @@ process.on('SIGTERM', () => {
   logInfo('[*] SIGTERM received, shutting down.');
   shutdown('offline', 0);
 });
-
 process.on('SIGINT', () => {
   logInfo('[*] SIGINT received, shutting down.');
   shutdown('offline', 0);
 });
-
 process.on('uncaughtException', (e) => {
   console.error('[-] Uncaught:', (e && e.stack) || e);
   shutdown('error', 1);
 });
-
 process.on('unhandledRejection', (e) => {
   console.error('[-] Unhandled:', (e && e.stack) || e);
   shutdown('error', 1);
@@ -255,7 +237,6 @@ process.on('unhandledRejection', (e) => {
 
 // ---------- Roon ----------
 const roon = new RoonApi({
-  log_level: ROON_API_LOG_LEVEL,
   extension_id: 'my.cover.fetcher.local',
   display_name: 'Cover Fetcher LOCAL',
   display_version: BRIDGE_VERSION,
@@ -265,16 +246,13 @@ const roon = new RoonApi({
   core_paired: (core) => {
     paired = true;
     coreInfo = { name: core.display_name, version: core.display_version };
-
     logInfo('[+] Paired with Roon.');
     setStatus('online');
 
     core.services.RoonApiTransport.subscribe_zones((resp, msg) => {
       if (resp === 'NetworkError' || !msg) {
         logInfo('[-] Zone subscription ended: ' + resp);
-
         if (!shuttingDown) setStatus('roon_disconnected');
-
         return;
       }
 
@@ -288,7 +266,6 @@ const roon = new RoonApi({
         // If the module is unavailable, throws, or returns no match,
         // publish null and continue processing the zone.
         let signalPath = null;
-
         if (readSignalPathForZone && z.state === 'playing') {
           try {
             signalPath = readSignalPathForZone(z);
@@ -311,18 +288,14 @@ const roon = new RoonApi({
           is_seek_allowed: z.is_seek_allowed || false,
           queue_items_remaining: z.queue_items_remaining || 0,
           queue_time_remaining: z.queue_time_remaining || 0,
-
           settings: {
             loop: z.settings ? z.settings.loop : 'disabled',
             shuffle: z.settings ? z.settings.shuffle : false,
             auto_radio: z.settings ? z.settings.auto_radio : false
           },
-
           outputs: [],
-
           // Optional Signal Path data, independent for each zone
           signal_path: signalPath,
-
           timestamp: new Date().toISOString()
         };
 
@@ -332,7 +305,6 @@ const roon = new RoonApi({
             payload.outputs.push({
               output_id: out.output_id,
               name: out.display_name,
-
               volume: out.volume
                 ? {
                     type: out.volume.type,
@@ -350,15 +322,12 @@ const roon = new RoonApi({
         // Media metadata
         if (z.now_playing) {
           const np = z.now_playing;
-
           const trackTitle = np.three_line
             ? np.three_line.line1
             : (np.one_line ? np.one_line.line1 : 'Unknown title');
-
           const artistName = np.three_line
             ? np.three_line.line2
             : 'Unknown artist';
-
           const albumName = np.three_line
             ? np.three_line.line3
             : 'Unknown album';
@@ -376,12 +345,10 @@ const roon = new RoonApi({
 
           if (lastTrack[zoneName] !== sig) {
             lastTrack[zoneName] = sig;
-
             logInfo(
               `[~] ${zoneName}: ${artistName} - ${trackTitle} ` +
               `(cover: ${imageKey ? 'yes' : 'no'}, artist images: ${artistKeys.length})`
             );
-
             logDebug(
               `    cover key: ${imageKey || 'none'}, artist keys: ${artistKeys.join(', ') || 'none'}`
             );
@@ -416,7 +383,6 @@ const roon = new RoonApi({
 
   core_unpaired: () => {
     paired = false;
-
     logInfo('[-] Connection to the Roon Core lost, restarting via systemd.');
     shutdown('roon_disconnected', 1);
   }
@@ -428,20 +394,21 @@ roon.init_services({
 });
 
 logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
-
 roon.ws_connect({
   host: ROON_HOST,
   port: ROON_PORT
 });
 
-// Watchdog: report missing Roon pairing with an actionable message
+// Watchdog: report missing Roon pairing with an actionable message.
+// The bridge does NOT exit here: it publishes "pairing_required" (retained, refreshed by the
+// heartbeat) and keeps waiting. As soon as the extension is enabled in the Roon app,
+// core_paired() fires and the status switches to "online".
 setTimeout(() => {
   if (!paired && !shuttingDown) {
     console.error(
       '[-] ERROR: Coupling to Roon Core required via Roon app. ' +
       'Open Roon Settings > Extensions and enable/pair this bridge.'
     );
-
-    shutdown('error', 1);
+    setStatus('pairing_required');
   }
-}, PAIR_TIMEOUT_MS);
+}, PAIR_HINT_MS);

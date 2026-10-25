@@ -8,26 +8,25 @@
 
   // No installation-specific values here. Everything is passed as card options.
   const DEFAULTS = {
-    player: '',                            // required: media player entity
-    zone: '',                              // optional: zone name; sensor defaults to sensor.roon_<zone>_json
-    sensor: '',                            // optional: bridge zone sensor (overrides the zone default)
-    status_sensor: '',                     // optional: bridge status sensor (default sensor.roon_bridge_status)
-    roon_url: '',                          // optional: image API base URL (default: image_base_url from the bridge status)
-    heartbeat_timeout: 90,                 // seconds without a new bridge heartbeat before fallback; 0 = off
-    clock_url: '/',                        // URL used for the clock sync (only the Date header is read)
-    bg_aspects_main: ['12by10', '4by3'],   // aspect ratios for the first artist
-    bg_aspects_other: ['12by10'],          // aspect ratios for further artists
-    bg_interval: 15,                       // seconds per image
-    zoom_seconds: 30,                      // cover zoom hides itself after this time
-    cover_fit: 'contain',                  // 'contain' = whole cover, 'cover' = fill
-    lyrics: true,                          // false = lyrics off (same as 'nosongtext')
-    lyrics_dim: 0.55,                      // dimming of the image behind the lyrics
-    lyrics_offset: 0.2,                    // seconds: positive = lyrics earlier, negative = later
-    format_attr: '',                       // attribute path(s) shown as audio format; empty = auto from signal_path
-    // Switches, e.g. options: [nosongtext, noaspect, nosource, nostatus]
+    player: '',                 // required: media player entity
+    zone: '',                   // optional: zone name; sensor defaults to sensor.roon_<zone>_json
+    sensor: '',                 // optional: bridge zone sensor (overrides the zone default)
+    status_sensor: '',          // optional: bridge status sensor (default sensor.roon_bridge_status)
+    roon_url: '',               // optional: image API base URL (default: image_base_url from the bridge status)
+    heartbeat_timeout: 90,      // seconds without a new bridge heartbeat before fallback; 0 = off
+    clock_url: '/',             // URL used for the clock sync (only the Date header is read)
+    bg_aspects_main: ['12by10', '4by3'],  // aspect ratios for the first artist
+    bg_aspects_other: ['12by10'],         // aspect ratios for further artists
+    bg_interval: 15,            // seconds per image
+    zoom_seconds: 30,           // cover zoom hides itself after this time
+    cover_fit: 'contain',       // 'contain' = whole cover, 'cover' = fill
+    lyrics: true,               // false = lyrics off (same as 'nosongtext')
+    lyrics_dim: 0.55,           // dimming of the image behind the lyrics
+    lyrics_offset: 0.2,         // seconds: positive = lyrics earlier, negative = later
+    format_attr: '',            // attribute path(s) shown as audio format; empty = auto from signal_path
+    // Switches, e.g. options: [nosongtext, noaspect, nostatus]
     //   nosongtext   lyrics off
     //   noaspect     do not show the aspect ratio in the pill
-    //   nosource     do not show "Artist"/"Cover" (and the aspect ratio) in the pill
     //   nostatus     status pill off
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
@@ -35,9 +34,9 @@
     //   nostale      disable the "bridge data is outdated" checks (title, status, heartbeat)
     //   debug        tap the pill to show a diagnostic panel
     options: [],
-    bar_h: 112,                            // height of the bottom bar in px
-    pad: 20,                               // horizontal padding of the bottom bar in px
-    max_height: '85vh'                     // maximum card height (any CSS length)
+    bar_h: 112,                 // height of the bottom bar in px
+    pad: 20,                    // horizontal padding of the bottom bar in px
+    max_height: '85vh'          // maximum card height (any CSS length)
   };
 
   const LYR_LINE_H = 44;
@@ -49,8 +48,10 @@
     next: 'M16,18V6H18V18H16M6,18V6L14.5,12L6,18Z',
     vol: 'M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18.03,19.86 21,16.28 21,12C21,7.72 18.03,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16.02C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z'
   };
+
   const svg = (size, path) =>
     '<svg viewBox="0 0 24 24" style="width:' + size + 'px;height:' + size + 'px;fill:#fff;pointer-events:none;"><path d="' + path + '"/></svg>';
+
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
   // ---------- Helpers ----------
@@ -86,6 +87,7 @@
   }
 
   const nz = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9\u00c0-\u024f]+/g, ''); };
+
   function sameTrack(a, b) {
     a = nz(a); b = nz(b);
     if (!a || !b) return false;
@@ -169,12 +171,12 @@
       const ch = s[i], code = s.charCodeAt(i);
       if (code < 256) bytes.push(code);
       else if (CP1252[ch] !== undefined) bytes.push(CP1252[ch]);
-      else return s;                      // real Unicode character: leave untouched
+      else return s; // real Unicode character: leave untouched
     }
     try {
       return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
     } catch (e) {
-      return s;                           // not valid UTF-8: leave unchanged
+      return s; // not valid UTF-8: leave unchanged
     }
   }
 
@@ -308,6 +310,7 @@
       }
       syncClock(this._cfg.clock_url);
     }
+
     _stopTimers() {
       if (this._timer) { clearInterval(this._timer); this._timer = null; }
       if (this._ro) { this._ro.disconnect(); this._ro = null; }
@@ -323,105 +326,105 @@
       const c = this._cfg;
       const mh = c.max_height;
       this.shadowRoot.innerHTML = `
-        <style>
-          :host { display:block; container-type:inline-size; }
-          ha-card { position:relative; overflow:hidden; width:100%; box-sizing:border-box; padding:0; margin:0;
-            background:rgb(42,42,46); border-radius:16px; height:${mh}; height:min(${mh},100cqw);
-            --bar-h:${c.bar_h}px; --pad:${c.pad}px; }
-          .bg { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); overflow:hidden; z-index:1;
-            cursor:pointer; touch-action:manipulation; background:rgb(22,22,22); }
-          .bgl { position:absolute; top:0; left:0; right:0; bottom:0; background-size:cover; background-repeat:no-repeat;
-            background-position:center top; pointer-events:none; transition:opacity 1.2s ease; opacity:0; }
-          .lyr { position:absolute; top:0; left:0; right:0; bottom:0; display:none; overflow:hidden; pointer-events:none;
-            background:rgba(0,0,0,${c.lyrics_dim}); }
-          .lyr-in { position:absolute; left:0; right:0; top:0; transition:transform 0.35s ease; will-change:transform; }
-          .rl { min-height:${LYR_LINE_H}px; padding:6px 16px; box-sizing:border-box; display:flex; align-items:center;
-            justify-content:center; text-align:center; line-height:1.25; white-space:normal; overflow-wrap:anywhere;
-            color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif; font-size:1.25rem; font-weight:500;
-            text-shadow:0 1px 4px rgba(0,0,0,0.7); transition:opacity 0.4s; opacity:0.35; }
-          .pill { position:absolute; right:10px; bottom:10px; z-index:4; display:none; padding:3px 10px; border-radius:999px;
-            background:rgba(0,0,0,0.55); color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif;
-            font-size:0.72rem; font-weight:500; letter-spacing:0.02em; pointer-events:none; }
-          .dbg { position:absolute; left:8px; right:8px; top:8px; bottom:40px; z-index:3; display:none; overflow:auto;
-            box-sizing:border-box; padding:10px; border-radius:8px; background:rgba(0,0,0,0.82); color:#fff;
-            font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all;
-            cursor:pointer; touch-action:manipulation; }
-          .zoom { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); z-index:5; display:none;
-            align-items:center; justify-content:center; background:rgba(0,0,0,0.82);
-            backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer; touch-action:manipulation; }
-          .zimg { flex:none; height:88%; aspect-ratio:1/1; border-radius:6px; background-size:cover;
-            background-position:center; background-repeat:no-repeat; box-shadow:0 8px 30px rgba(0,0,0,0.7);
-            animation:zin 0.2s ease-out; pointer-events:none; }
-          @keyframes zin { from { opacity:0; transform:scale(0.92); } to { opacity:1; transform:scale(1); } }
-          @keyframes scroll { 0%, 12% { transform:translateX(0); } 88%, 100% { transform:translateX(var(--dx)); } }
-          .bar { position:absolute; bottom:0; left:0; right:0; height:var(--bar-h); background:rgb(42,42,46); z-index:6;
-            box-sizing:border-box; padding:16px var(--pad) 0 var(--pad); }
-          .row { display:flex; align-items:flex-start; width:100%; }
-          .cover { flex:none; width:72px; height:72px; border-radius:3px; background-size:cover; background-position:center;
-            background-repeat:no-repeat; box-shadow:0 1px 4px rgba(0,0,0,0.35); margin-right:14px; cursor:pointer;
-            touch-action:manipulation; }
-          .info { display:flex; flex-direction:column; align-items:stretch; text-align:left; flex:1; min-width:0; gap:2px;
-            font-family:Roboto,'Helvetica Neue',Arial,sans-serif; -webkit-font-smoothing:antialiased; }
-          .l1 { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
-          .tw { flex:1; min-width:0; color:#fff; font-size:1.4rem; font-weight:700; line-height:1.15; letter-spacing:-0.01em;
-            white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-          .time { color:#fff; font-size:0.8rem; font-weight:600; white-space:nowrap; flex-shrink:0; }
-          .sw { color:#fff; font-size:1.1rem; font-weight:400; line-height:1.25; white-space:nowrap; overflow:hidden;
-            text-overflow:ellipsis; }
-          .tw span, .sw span { display:inline-block; }
-          .ctl { display:flex; align-items:center; margin-top:-2px; }
-          .vicon { display:flex; align-items:center; flex-shrink:0; margin-left:-3px; }
-          .btns { display:flex; align-items:center; gap:26px; flex-shrink:0; }
-          .btn { cursor:pointer; display:flex; align-items:center; justify-content:center; padding:6px; margin:-6px;
-            touch-action:manipulation; }
-          .btn.last { margin-right:-12.5px; }
-          .vol { -webkit-appearance:none; appearance:none; flex:1; min-width:0; height:22px; margin:0 20px 0 10px;
-            background:transparent; cursor:pointer; touch-action:manipulation; }
-          .vol::-webkit-slider-runnable-track { height:6px; border-radius:3px;
-            background:linear-gradient(to right,#f29d38 var(--v),#cfcfcf var(--v)); }
-          .vol::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px; border-radius:50%;
-            background:#f29d38; margin-top:-7px; border:none; }
-          .vol::-moz-range-track { height:6px; border-radius:3px;
-            background:linear-gradient(to right,#f29d38 var(--v),#cfcfcf var(--v)); }
-          .vol::-moz-range-thumb { width:20px; height:20px; border-radius:50%; background:#f29d38; border:none; }
-          .seek { position:absolute; bottom:0; left:0; right:0; height:16px; cursor:pointer; z-index:3;
-            touch-action:manipulation; }
-          .seek-track { position:absolute; bottom:0; left:0; right:0; height:5px; background:rgba(255,255,255,0.15);
-            overflow:hidden; pointer-events:none; }
-          .seek-bar { height:100%; background:#f29d38; width:0%; }
-        </style>
-        <ha-card>
-          <div class="bg" id="bg">
-            <div class="bgl" id="bga"></div>
-            <div class="bgl" id="bgb"></div>
-            <div class="lyr" id="lyr"><div class="lyr-in" id="lyrIn"></div></div>
-            <div class="dbg" id="dbg"></div>
-            <div class="pill" id="pill"></div>
+<style>
+  :host { display:block; container-type:inline-size; }
+  ha-card { position:relative; overflow:hidden; width:100%; box-sizing:border-box; padding:0; margin:0;
+    background:rgb(42,42,46); border-radius:16px; height:${mh}; height:min(${mh},100cqw);
+    --bar-h:${c.bar_h}px; --pad:${c.pad}px; }
+  .bg { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); overflow:hidden; z-index:1;
+    cursor:pointer; touch-action:manipulation; background:rgb(22,22,22); }
+  .bgl { position:absolute; top:0; left:0; right:0; bottom:0; background-size:cover; background-repeat:no-repeat;
+    background-position:center top; pointer-events:none; transition:opacity 1.2s ease; opacity:0; }
+  .lyr { position:absolute; top:0; left:0; right:0; bottom:0; display:none; overflow:hidden; pointer-events:none;
+    background:rgba(0,0,0,${c.lyrics_dim}); }
+  .lyr-in { position:absolute; left:0; right:0; top:0; transition:transform 0.35s ease; will-change:transform; }
+  .rl { min-height:${LYR_LINE_H}px; padding:6px 16px; box-sizing:border-box; display:flex; align-items:center;
+    justify-content:center; text-align:center; line-height:1.25; white-space:normal; overflow-wrap:anywhere;
+    color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif; font-size:1.25rem; font-weight:500;
+    text-shadow:0 1px 4px rgba(0,0,0,0.7); transition:opacity 0.4s; opacity:0.35; }
+  .pill { position:absolute; right:10px; bottom:10px; z-index:4; display:none; padding:3px 10px; border-radius:999px;
+    background:rgba(0,0,0,0.55); color:#fff; font-family:Roboto,'Helvetica Neue',Arial,sans-serif;
+    font-size:0.72rem; font-weight:500; letter-spacing:0.02em; pointer-events:none; }
+  .dbg { position:absolute; left:8px; right:8px; top:8px; bottom:40px; z-index:3; display:none; overflow:auto;
+    box-sizing:border-box; padding:10px; border-radius:8px; background:rgba(0,0,0,0.82); color:#fff;
+    font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all;
+    cursor:pointer; touch-action:manipulation; }
+  .zoom { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); z-index:5; display:none;
+    align-items:center; justify-content:center; background:rgba(0,0,0,0.82);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer; touch-action:manipulation; }
+  .zimg { flex:none; height:88%; aspect-ratio:1/1; border-radius:6px; background-size:cover;
+    background-position:center; background-repeat:no-repeat; box-shadow:0 8px 30px rgba(0,0,0,0.7);
+    animation:zin 0.2s ease-out; pointer-events:none; }
+  @keyframes zin { from { opacity:0; transform:scale(0.92); } to { opacity:1; transform:scale(1); } }
+  @keyframes scroll { 0%, 12% { transform:translateX(0); } 88%, 100% { transform:translateX(var(--dx)); } }
+  .bar { position:absolute; bottom:0; left:0; right:0; height:var(--bar-h); background:rgb(42,42,46); z-index:6;
+    box-sizing:border-box; padding:16px var(--pad) 0 var(--pad); }
+  .row { display:flex; align-items:flex-start; width:100%; }
+  .cover { flex:none; width:72px; height:72px; border-radius:3px; background-size:cover; background-position:center;
+    background-repeat:no-repeat; box-shadow:0 1px 4px rgba(0,0,0,0.35); margin-right:14px; cursor:pointer;
+    touch-action:manipulation; }
+  .info { display:flex; flex-direction:column; align-items:stretch; text-align:left; flex:1; min-width:0; gap:2px;
+    font-family:Roboto,'Helvetica Neue',Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .l1 { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .tw { flex:1; min-width:0; color:#fff; font-size:1.4rem; font-weight:700; line-height:1.15; letter-spacing:-0.01em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .time { color:#fff; font-size:0.8rem; font-weight:600; white-space:nowrap; flex-shrink:0; }
+  .sw { color:#fff; font-size:1.1rem; font-weight:400; line-height:1.25; white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .tw span, .sw span { display:inline-block; }
+  .ctl { display:flex; align-items:center; margin-top:-2px; }
+  .vicon { display:flex; align-items:center; flex-shrink:0; margin-left:-3px; }
+  .btns { display:flex; align-items:center; gap:26px; flex-shrink:0; }
+  .btn { cursor:pointer; display:flex; align-items:center; justify-content:center; padding:6px; margin:-6px;
+    touch-action:manipulation; }
+  .btn.last { margin-right:-12.5px; }
+  .vol { -webkit-appearance:none; appearance:none; flex:1; min-width:0; height:22px; margin:0 20px 0 10px;
+    background:transparent; cursor:pointer; touch-action:manipulation; }
+  .vol::-webkit-slider-runnable-track { height:6px; border-radius:3px;
+    background:linear-gradient(to right,#f29d38 var(--v),#cfcfcf var(--v)); }
+  .vol::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px; border-radius:50%;
+    background:#f29d38; margin-top:-7px; border:none; }
+  .vol::-moz-range-track { height:6px; border-radius:3px;
+    background:linear-gradient(to right,#f29d38 var(--v),#cfcfcf var(--v)); }
+  .vol::-moz-range-thumb { width:20px; height:20px; border-radius:50%; background:#f29d38; border:none; }
+  .seek { position:absolute; bottom:0; left:0; right:0; height:16px; cursor:pointer; z-index:3;
+    touch-action:manipulation; }
+  .seek-track { position:absolute; bottom:0; left:0; right:0; height:5px; background:rgba(255,255,255,0.15);
+    overflow:hidden; pointer-events:none; }
+  .seek-bar { height:100%; background:#f29d38; width:0%; }
+</style>
+<ha-card>
+  <div class="bg" id="bg">
+    <div class="bgl" id="bga"></div>
+    <div class="bgl" id="bgb"></div>
+    <div class="lyr" id="lyr"><div class="lyr-in" id="lyrIn"></div></div>
+    <div class="dbg" id="dbg"></div>
+    <div class="pill" id="pill"></div>
+  </div>
+  <div class="zoom" id="zoom"><div class="zimg" id="zimg"></div></div>
+  <div class="bar">
+    <div class="row">
+      <div class="cover" id="cover"></div>
+      <div class="info">
+        <div class="l1">
+          <div class="tw" id="tw"><span id="title"></span></div>
+          <div class="time" id="time"></div>
+        </div>
+        <div class="sw" id="sw"><span id="sub"></span></div>
+        <div class="ctl">
+          <div class="vicon">${svg(26, ICON.vol)}</div>
+          <input class="vol" id="vol" type="range" min="0" max="100" value="0">
+          <div class="btns">
+            <div class="btn" id="prev">${svg(26, ICON.prev)}</div>
+            <div class="btn" id="pp">${svg(30, ICON.play)}</div>
+            <div class="btn last" id="next">${svg(26, ICON.next)}</div>
           </div>
-          <div class="zoom" id="zoom"><div class="zimg" id="zimg"></div></div>
-          <div class="bar">
-            <div class="row">
-              <div class="cover" id="cover"></div>
-              <div class="info">
-                <div class="l1">
-                  <div class="tw" id="tw"><span id="title"></span></div>
-                  <div class="time" id="time"></div>
-                </div>
-                <div class="sw" id="sw"><span id="sub"></span></div>
-                <div class="ctl">
-                  <div class="vicon">${svg(26, ICON.vol)}</div>
-                  <input class="vol" id="vol" type="range" min="0" max="100" value="0">
-                  <div class="btns">
-                    <div class="btn" id="prev">${svg(26, ICON.prev)}</div>
-                    <div class="btn" id="pp">${svg(30, ICON.play)}</div>
-                    <div class="btn last" id="next">${svg(26, ICON.next)}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="seek" id="seek"><div class="seek-track"><div class="seek-bar" id="sbar"></div></div></div>
-          </div>
-        </ha-card>`;
+        </div>
+      </div>
+    </div>
+    <div class="seek" id="seek"><div class="seek-track"><div class="seek-bar" id="sbar"></div></div></div>
+  </div>
+</ha-card>`;
 
       const $ = (id) => this.shadowRoot.getElementById(id);
       this._el = {
@@ -534,7 +537,6 @@
       const ib = imageBase(c, bi);
       const base = ib.url;
       const mixed = !!base && location.protocol === 'https:' && base.indexOf('http:') === 0;
-
       const json = (c.sensor && hass.states[c.sensor] && hass.states[c.sensor].attributes) || {};
       const np = stale ? {} : (json.now_playing || {});
       const album = np.album || a.media_album_name || '';
@@ -641,9 +643,11 @@
       const o = this._opts, el = this._el, d = this._d;
       if (!d) return;
       const s = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
+      // Bridge is running but the extension is not enabled in the Roon app yet
+      const pairing = d.bi.status === 'pairing_required';
       const p = [];
       if (!o.nostatus) {
-        if (s && !o.nosource) {
+        if (s) {
           if (s.kind === 'artist') {
             p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
             if (!o.noaspect) p.push(s.asp);
@@ -656,7 +660,8 @@
         else if (this._artFail) p.push('artwork unreachable');
         if (d.stale) {
           p.push('Fallback');
-          if (d.reason.indexOf('bridge') === 0) p.push(d.reason);
+          if (pairing) p.push('Roon-Kopplung nötig: Einstellungen › Erweiterungen aktivieren');
+          else if (d.reason.indexOf('bridge') === 0) p.push(d.reason);
         }
         if (d.statusMissing) p.push('status sensor missing');
         if (d.fmt && !o.noformat) p.push(d.fmt);
@@ -665,6 +670,9 @@
       if (o.debug && !txt) txt = 'debug';
       el.pill.textContent = txt;
       el.pill.style.display = txt ? 'block' : 'none';
+      el.pill.style.background = (pairing && !o.nostatus) ? 'rgba(200,60,40,0.9)' : '';
+      el.pill.style.maxWidth = 'calc(100% - 20px)';
+      el.pill.style.textAlign = 'right';
 
       const act = (!o.nounderline && s && s.kind === 'artist' && d.names.length > 1) ? s.ai : -1;
       el.sub.querySelectorAll('.ra').forEach(function (n) {
@@ -684,22 +692,22 @@
       const lines = [
         'roon-player-card',
         '',
-        'player:         ' + c.player,
-        'sensor:         ' + (c.sensor || '(none, player-only mode)'),
-        'status sensor:  ' + c.status_sensor + (d.bi.exists ? '' : '  (NOT FOUND)'),
+        'player: ' + c.player,
+        'sensor: ' + (c.sensor || '(none, player-only mode)'),
+        'status sensor: ' + c.status_sensor + (d.bi.exists ? '' : ' (NOT FOUND)'),
         '',
-        'bridge status:  ' + (d.bi.status || '(unknown)'),
+        'bridge status: ' + (d.bi.status || '(unknown)'),
         'bridge version: ' + (a.bridge_version || 'n/a'),
-        'core:           ' + (a.core ? a.core.name + ' ' + a.core.version : 'n/a'),
-        'heartbeat age:  ' + hbAge + ' (limit ' + (Number(c.heartbeat_timeout) || 'off') + ')',
-        'fallback:       ' + (d.stale ? 'YES, ' + d.reason : 'no'),
+        'core: ' + (a.core ? a.core.name + ' ' + a.core.version : 'n/a'),
+        'heartbeat age: ' + hbAge + ' (limit ' + (Number(c.heartbeat_timeout) || 'off') + ')',
+        'fallback: ' + (d.stale ? 'YES, ' + d.reason : 'no'),
         '',
-        'image base:     ' + (d.base || '(none)') + '  [' + d.baseSrc + ']',
-        'page protocol:  ' + location.protocol + (d.mixed ? '  (mixed content!)' : ''),
-        'artwork probe:  ' + (this._artFail ? 'FAILED' : 'ok / not tested'),
-        'slides:         ' + this._slides.length + ' (now: ' + (this._bgIdx + 1) + ')',
-        'current image:  ' + (cur ? cur.u : '(none)'),
-        'format:         ' + (d.fmt || '(none)')
+        'image base: ' + (d.base || '(none)') + ' [' + d.baseSrc + ']',
+        'page protocol: ' + location.protocol + (d.mixed ? ' (mixed content!)' : ''),
+        'artwork probe: ' + (this._artFail ? 'FAILED' : 'ok / not tested'),
+        'slides: ' + this._slides.length + ' (now: ' + (this._bgIdx + 1) + ')',
+        'current image: ' + (cur ? cur.u : '(none)'),
+        'format: ' + (d.fmt || '(none)')
       ];
       this._el.dbg.textContent = lines.join('\n');
     }
@@ -711,6 +719,7 @@
       layer.style.backgroundSize = fit ? this._cfg.cover_fit : 'cover';
       layer.style.backgroundPosition = fit ? 'center center' : 'center top';
     }
+
     _showSlide(idx, instant) {
       const s = this._slides[idx];
       if (!s) {
