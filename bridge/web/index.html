@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roon Player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #ccc; font-family: sans-serif; }
+  #wrap { max-width: 900px; margin: 0 auto; }
+  #msg { padding: 20px; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="msg">Waiting for the bridge...</div></div>
+
+<script>
+  // The card draws itself inside <ha-card>, which only exists in Home Assistant.
+  customElements.define('ha-card', class extends HTMLElement {
+    connectedCallback() { this.style.display = 'block'; }
+  });
+</script>
+<script src="roon-card.js"></script>
+<script>
+  // URL parameters:  ?zone=Living%20room   &options=nostatus,noformat   &img=http://host:9330/api/image
+  const params = new URLSearchParams(location.search);
+  const wanted = (params.get('zone') || '').toLowerCase();
+  const cardOptions = (params.get('options') || '').split(/[\s,;]+/).filter(Boolean);
+  const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+  const states = {};   // entity_id -> { state, attributes }   (what Home Assistant would provide)
+  const zoneIds = {};  // entity_id -> zone_id
+  const zoneNames = {}; // zone_id -> display name
+  let status = null;
+  let card = null;
+
+  // Roon core image API; used if the bridge has no IMAGE_URL_BASE configured
+  const imgDefault = params.get('img') || (location.protocol + '//' + location.hostname + ':9330/api/image');
+
+  // Replacement for hass.callService
+  function callService(domain, service, data) {
+    const zone = zoneIds[data.entity_id];
+    if (!zone) return;
+    const map = {
+      media_play_pause: ['playpause'],
+      media_next_track: ['next'],
+      media_previous_track: ['previous'],
+      media_seek: ['seek', data.seek_position],
+      volume_set: ['volume', data.volume_level]
+    };
+    const m = map[service];
+    if (!m) return;
+    fetch('/control?zone=' + encodeURIComponent(zone) + '&cmd=' + m[0] + '&value=' + (m[1] === undefined ? '' : m[1]),
+      { method: 'POST' }).catch(() => {});
+  }
+
+  function volumeLevel(p) {
+    const o = (p.outputs || []).find((x) => x.volume && typeof x.volume.min === 'number' &&
+      typeof x.volume.max === 'number' && x.volume.max > x.volume.min && typeof x.volume.value === 'number');
+    return o ? (o.volume.value - o.volume.min) / (o.volume.max - o.volume.min) : 0;
+  }
+
+  function imageBase() {
+    const b = (status && status.attributes.image_base_url) || imgDefault;
+    return b.replace(/\/+$/, '') + '/';
+  }
+
+  // Zone message of the bridge -> media_player entity + zone sensor
+  function applyZone(p) {
+    const s = slug(p.zone_name);
+    const np = p.now_playing;
+    const player = 'media_player.' + s;
+    zoneIds[player] = p.zone_id;
+    zoneNames[p.zone_id] = p.zone_name;
+
+    states[player] = {
+      state: { playing: 'playing', paused: 'paused', loading: 'buffering', stopped: 'idle' }[p.state] || 'idle',
+      attributes: {
+        media_title: np ? np.track : '',
+        media_artist: np ? np.artist : '',
+        media_album_name: np ? np.album : '',
+        entity_picture: np && np.image_key ? imageBase() + np.image_key + '?scale=fit&width=600&height=600' : '',
+        media_duration: np ? np.length : 0,
+        media_position: np ? np.seek_position : 0,
+        media_position_updated_at: p.timestamp,
+        volume_level: volumeLevel(p)
+      }
+    };
+    states['sensor.roon_' + s + '_json'] = { state: p.state, attributes: p };
+    return { player: player, name: p.zone_name };
+  }
+
+  function applyStatus(st) {
+    status = { state: st.status, attributes: st };
+    states['sensor.roon_bridge_status'] = status;
+  }
+
+  function push() {
+    if (card) card.hass = { states: Object.assign({}, states), callService: callService };
+  }
+
+  function ensureCard(z) {
+    if (card) return;
+    if (wanted && z.name.toLowerCase() !== wanted) return;
+    card = document.createElement('roon-player-card');
+    card.setConfig({ player: z.player, zone: z.name, options: cardOptions });
+    const wrap = document.getElementById('wrap');
+    wrap.innerHTML = '';
+    wrap.appendChild(card);
+  }
+
+  const es = new EventSource('/events');
+  es.addEventListener('status', (ev) => { applyStatus(JSON.parse(ev.data)); push(); });
+  es.addEventListener('zone', (ev) => {
+    const z = applyZone(JSON.parse(ev.data));
+    ensureCard(z);
+    push();
+  });
+
+  // Requested zone never showed up: list the zones that exist
+  setTimeout(() => {
+    if (card) return;
+    const names = Object.keys(zoneNames).map((id) => zoneNames[id]);
+    document.getElementById('msg').textContent = names.length
+      ? 'Zone "' + (params.get('zone') || '') + '" not found. Available: ' + names.join(', ')
+      : 'No zones received. Is the bridge paired with Roon?';
+  }, 5000);
+</script>
+</body>
+</html>
