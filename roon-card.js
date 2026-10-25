@@ -31,6 +31,7 @@
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
     //   noscroll     no marquee for title/artist/album (use "..." instead)
+    //   nosource    do not show the image source (Cover / Artist n/m) in the pill
     //   nostale      disable the "bridge data is outdated" checks (title, status, heartbeat)
     //   debug        tap the pill to show a diagnostic panel
     options: [],
@@ -649,9 +650,9 @@
       if (!o.nostatus) {
         if (s) {
           if (s.kind === 'artist') {
-            p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
+            if (!o.nosource) p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
             if (!o.noaspect) p.push(s.asp);
-          } else {
+          } else if (!o.nosource) {
             p.push('Cover');
           }
         }

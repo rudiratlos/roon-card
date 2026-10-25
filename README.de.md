@@ -248,6 +248,7 @@ Die Bildformate werden als `?aspect=...` an die Roon-Bild-API übergeben. Getest
 | `nosongtext`  | Songtexte nicht anzeigen                                                                                    |
 | `nostatus`    | Statusanzeige nicht anzeigen (Künstlernummer, Format, Fallback, Audioformat)                                |
 | `noaspect`    | Seitenverhältnis in der Statusanzeige nicht anzeigen                                                        |
+| `nosource`    | Artist/Cover string in der Statusanzeige nicht anzeigen                                                     |
 | `noformat`    | Audioformat in der Statusanzeige nicht anzeigen                                                             |
 | `nounderline` | den Namen des Künstlers, dessen Bild gerade läuft, nicht unterstreichen (nur bei Titeln mit mehreren Künstlern) |
 | `noscroll`    | lange Titel, Künstler oder Alben nicht scrollen, stattdessen "..." anzeigen                                 |

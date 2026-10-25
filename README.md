@@ -248,6 +248,7 @@ The image formats are passed to the Roon image API as `?aspect=...`. The formats
 | `nosongtext`  | do not show lyrics                                                                                  |
 | `nostatus`    | do not show the status pill (artist number, aspect, fallback, format)                               |
 | `noaspect`    | do not show the aspect ratio in the status pill                                                     |
+| `nosource`    | do not show the artist/cover string in the status pill                                              |
 | `noformat`    | do not show the audio format in the status pill                                                     |
 | `nounderline` | do not underline the name of the artist whose image is shown (only for tracks with several artists) |
 | `noscroll`    | do not scroll long titles, artists or albums, use "..." instead                                     |
