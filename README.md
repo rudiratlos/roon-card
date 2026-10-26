@@ -430,6 +430,8 @@ The bridge can serve the card as a web page of its own. Then no Home Assistant i
 
 The page gets its data directly from the bridge. The browser needs no MQTT access. The MQTT output of the bridge keeps working in parallel, so Home Assistant and the standalone page can be used at the same time.
 
+Screenshots are in the ./img directory, named webserver_X.jpg
+
 **Files** (all in the repository, nothing else to install):
 
 | File                      | Purpose                                                                        |

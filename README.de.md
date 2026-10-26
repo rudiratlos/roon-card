@@ -463,6 +463,8 @@ http://<roon-server-ip>:8080/?zone=Wohnzimmer&options=nosource
 
 **Kiosk auf einem Raspberry Pi:** Chromium im Kiosk-Modus mit dieser URL starten, zum Beispiel mit `cage -- chromium --kiosk --ozone-platform=wayland "<URL>"`.
 
+Screenshots (webserver_X.jpg) sind im ./img directory.
+
 > [!WARNING]
 > Die Seite hat keinen Passwortschutz. Jeder im Netzwerk kann Wiedergabe und Lautstärke steuern. Den Port nicht ins Internet freigeben.
 
