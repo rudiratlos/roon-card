@@ -9,6 +9,8 @@ A Home Assistant dashboard card and a small bridge that bring a Roon-style "now 
 - **roon-card** is a custom Lovelace card. It shows the album cover, rotating artist images, title, artist and album, and offers transport controls, volume, seeking and synchronized lyrics.
 - **roon-bridge** is a small Node.js service. It reads the playback state of your Roon zones from the Roon Core and publishes it to your MQTT broker.
 
+The bridge can also serve the card as a standalone web page, so it runs without Home Assistant too (see [Standalone page](#standalone-page-without-home-assistant)).
+
 The original Roon Display needs a modern browser and does not run on lightweight displays such as the Shelly Wall Display. **This card does.**
 
 [![Comparison](https://github.com/rudiratlos/roon-card/raw/main/img/roon-card_vs_roon-display.jpg)](https://github.com/rudiratlos/roon-card/blob/main/img/roon-card_vs_roon-display.jpg)
@@ -34,6 +36,7 @@ The right side is the original Roon Display, the left side is roon-card. Tapping
 - [Installation of roon-card](#installation-of-roon-card)
 - [Usage](#usage)
 - [roon-bridge](#roon-bridge)
+  - [Standalone page without Home Assistant](#standalone-page-without-home-assistant)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -248,7 +251,7 @@ The image formats are passed to the Roon image API as `?aspect=...`. The formats
 | `nosongtext`  | do not show lyrics                                                                                  |
 | `nostatus`    | do not show the status pill (artist number, aspect, fallback, format)                               |
 | `noaspect`    | do not show the aspect ratio in the status pill                                                     |
-| `nosource`    | do not show the artist/cover string in the status pill                                              |
+| `nosource`    | do not show the image source (`Cover` / `Artist n/m`) in the status pill                            |
 | `noformat`    | do not show the audio format in the status pill                                                     |
 | `nounderline` | do not underline the name of the artist whose image is shown (only for tracks with several artists) |
 | `noscroll`    | do not scroll long titles, artists or albums, use "..." instead                                     |
@@ -393,10 +396,11 @@ Variables already set in the process environment take precedence over values in 
 | `MQTT_TOPIC`      | `roon/now_playing`                             | Base topic for zone and status messages                 |
 | `ROON_HOST`       | `127.0.0.1`                                    | Hostname or IP address of the Roon Core                 |
 | `ROON_PORT`       | `9330`                                         | Roon Core WebSocket port                                |
-| `PAIR_TIMEOUT_MS` | `90000`                                        | Timeout for pairing with the Roon Core                  |
+| `PAIR_HINT_MS`    | `15000`                                        | Time without pairing after which the status switches to `pairing_required`. The bridge keeps waiting |
 | `HEARTBEAT_MS`    | `30000`                                        | Interval between status updates, in milliseconds        |
-| `LOG_LEVEL`       | `info`                                         | Set to `debug` for additional diagnostic output         |
-| `IMAGE_URL_BASE`  | Empty                                          | Optional base URL for the Roon image API                |
+| `LOG_LEVEL`       | `info`                                         | `info` hides the Roon protocol messages (they contain tokens, zone and image keys). `debug` prints everything |
+| `IMAGE_URL_BASE`  | Empty                                          | Optional base URL for the Roon image API, as reachable by the browsers |
+| `WEB_PORT`        | Empty (off)                                    | Port of the optional [standalone page](#standalone-page-without-home-assistant), e.g. `8080` |
 | `SIGNAL_PATH_LOG` | `/var/roon/RoonServer/Logs/RoonServer_log.txt` | Path to the Roon Server log used by Signal Path support |
 
 **Note:** `SIGNAL_PATH_LOG` is read when `signal-path.js` is loaded. In the current implementation, that happens before the bridge loads its `.env` file. To override the path reliably, set `SIGNAL_PATH_LOG` in the process environment before starting Node.js. The default path works without additional configuration when the log is available there.
@@ -411,13 +415,56 @@ MQTT_PASSWORD=
 
 ROON_HOST=127.0.0.1
 ROON_PORT=9330
-PAIR_TIMEOUT_MS=90000
+PAIR_HINT_MS=15000
 HEARTBEAT_MS=30000
 LOG_LEVEL=info
 IMAGE_URL_BASE=http://192.168.1.20:9330/api/image
+WEB_PORT=8080
 ```
 
 Set `IMAGE_URL_BASE` to the URL reachable by your Home Assistant display browser. If it is unset, consumers must configure their own image URL.
+
+## Standalone page (without Home Assistant)
+
+The bridge can serve the card as a web page of its own. Then no Home Assistant is needed: a Raspberry Pi in kiosk mode, a tablet or any browser in your network opens the page and shows the card with all its features (cover, rotating artist images, lyrics, transport controls, volume and seeking).
+
+The page gets its data directly from the bridge. The browser needs no MQTT access. The MQTT output of the bridge keeps working in parallel, so Home Assistant and the standalone page can be used at the same time.
+
+**Files** (all in the repository, nothing else to install):
+
+| File                      | Purpose                                                                        |
+|---------------------------|--------------------------------------------------------------------------------|
+| `bridge/web.js`           | small web server (page, live data, transport controls)                         |
+| `bridge/web/index.html`   | page that hosts the card                                                       |
+| `roon-card.js`            | the card itself, found in `bridge/web/`, `bridge/` or the repository root      |
+
+The web server only starts if `bridge/web.js` exists and `WEB_PORT` is set. Without `WEB_PORT` the bridge behaves exactly as before.
+
+**Setup:** add these lines to `/etc/roon-mqtt.env` and restart the bridge:
+
+```
+WEB_PORT=8080
+IMAGE_URL_BASE=http://<roon-server-ip>:9330/api/image
+```
+
+The log then shows `[+] Web page on http://<this-host>:8080/`. Open the page in a browser:
+
+```
+http://<roon-server-ip>:8080/?zone=Living%20room&options=nosource
+```
+
+**URL parameters:**
+
+| Parameter | Description                                                                                                                                        |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `zone`    | name of the Roon zone, as shown in Roon (case does not matter). Without it, the first zone is used. If the zone is not found, the page lists the available zones |
+| `options` | switches of the card, separated by commas, e.g. `nosource,noaspect,nostatus` (see [Switches](#switches-options))                                   |
+| `img`     | base URL of the Roon image API. Only needed if `IMAGE_URL_BASE` is not set. Default: `http://<host of the page>:9330/api/image`                    |
+
+**Kiosk on a Raspberry Pi:** start Chromium in kiosk mode with this URL, for example with `cage -- chromium --kiosk --ozone-platform=wayland "<URL>"`.
+
+> [!WARNING]
+> The page has no password. Everybody in your network can control playback and volume. Do not expose the port to the internet.
 
 ## MQTT topics
 
@@ -435,9 +482,10 @@ The status payload includes a status value and timestamp. When available, it als
 | Status              | Meaning                                                  |
 |---------------------|----------------------------------------------------------|
 | `starting`          | The bridge has started but has not yet paired with Roon  |
+| `pairing_required`  | Still not paired after `PAIR_HINT_MS`: enable the extension in the Roon app (**Settings → Extensions**). The bridge keeps running and waits |
 | `online`            | The bridge is paired with Roon and can publish zone data |
 | `roon_disconnected` | The connection to Roon was lost                          |
-| `error`             | An unexpected error occurred or pairing timed out        |
+| `error`             | An unexpected error occurred                             |
 | `offline`           | The bridge stopped or disconnected unexpectedly          |
 
 The bridge publishes an `offline` Last Will message if its MQTT connection is lost unexpectedly. On a clean shutdown, it publishes the final status before exiting.
@@ -539,6 +587,7 @@ After reloading the MQTT configuration, open **Developer Tools → States** and 
 | Idle image is broken                             | `/local/icons/roon-logo.png` does not exist. With HACS this file has to be downloaded separately                                                                                      |
 | No lyrics                                        | the track has no synchronized lyrics at LRCLIB, the service is temporarily down (the card retries after a minute), or `nosongtext` is set                                             |
 | Lyrics are out of sync                           | adjust `lyrics_offset`. A wrong clock on the display can also cause a shift of one or two seconds                                                                                     |
+| Standalone page stays empty                      | `WEB_PORT` is missing or `web.js` / `web/index.html` are not in the bridge directory (the log must show `Web page on ...`). The bridge is not paired with Roon (status `pairing_required`). The zone name in `?zone=` does not exist: the page then lists the available zones after a few seconds |
 | Bridge does not start                            | `sudo journalctl -u roon-mqtt.service -n 50`. Check the extension is enabled in Roon and the broker settings in `/etc/roon-mqtt.env`                                                  |
 
 # License

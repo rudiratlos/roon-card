@@ -26,7 +26,13 @@
 const fs = require('fs');
 const path = require('path');
 
-const BRIDGE_VERSION = '1.6.4';
+// The version is maintained in package.json only
+let BRIDGE_VERSION = 'unknown';
+try {
+  BRIDGE_VERSION = require('./package.json').version || BRIDGE_VERSION;
+} catch (err) {
+  console.warn('[!] Could not read the version from package.json:', err.message);
+}
 
 // ---------- Optional Signal Path support ----------
 let readSignalPathForZone = null;
@@ -127,11 +133,15 @@ const STATUS_TOPIC = `${MQTT_TOPIC}/status`;
 // ---------- Logging ----------
 // node-roon-api prints every protocol message via console.log; those lines contain tokens,
 // zone IDs and image keys, so they are dropped unless LOG_LEVEL=debug.
+// The library passes the direction marker as a separate first argument ('<-', '->'), and
+// "ERROR undefined" as two arguments ('ERROR', undefined), so the arguments are checked one by one.
 const rawLog = console.log.bind(console);
 if (LOG_LEVEL !== 'debug') {
   console.log = (...args) => {
     const first = typeof args[0] === 'string' ? args[0] : '';
-    if (/^(->|<-)\s/.test(first) || /^ERROR undefined/.test(first)) return;
+    if (/^(->|<-)(\s|$)/.test(first)) return;
+    if (first === 'ERROR' && args.length > 1 && args[1] === undefined) return;
+    if (/^ERROR undefined/.test(first)) return;
     rawLog(...args);
   };
 }
