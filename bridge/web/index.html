@@ -21,7 +21,12 @@
 </script>
 <script src="roon-card.js"></script>
 <script>
-  // URL parameters:  ?zone=Living%20room   &options=nostatus,noformat   &img=http://host:9330/api/image
+  // URL parameters:
+  //   ?zone=Living%20room   zone to show
+  //   &options=nobuttons,nostatus,noformat   card switches (see roon-card.js)
+  //   &img=http://host:9330/api/image        Roon image API, if the bridge has no IMAGE_URL_BASE
+  //   &bio_lang=DE,EN       biography language order (TheAudioDB)
+  //   &audiodb=0            do not use the TheAudioDB cache of this server
   const params = new URLSearchParams(location.search);
   const wanted = (params.get('zone') || '').toLowerCase();
   const cardOptions = (params.get('options') || '').split(/[\s,;]+/).filter(Boolean);
@@ -102,7 +107,15 @@
     if (card) return;
     if (wanted && z.name.toLowerCase() !== wanted) return;
     card = document.createElement('roon-player-card');
-    card.setConfig({ player: z.player, zone: z.name, options: cardOptions });
+    card.setConfig({
+      player: z.player,
+      zone: z.name,
+      options: cardOptions,
+      // Cache of this server for TheAudioDB (artist images, biography). Without THEAUDIODB_KEY in the
+      // bridge's env file the server answers 503 and the card switches the feature off by itself.
+      audiodb_url: params.get('audiodb') === '0' ? '' : '/audiodb',
+      bio_lang: params.get('bio_lang') || ''
+    });
     const wrap = document.getElementById('wrap');
     wrap.innerHTML = '';
     wrap.appendChild(card);

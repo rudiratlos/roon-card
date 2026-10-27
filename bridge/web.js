@@ -7,10 +7,15 @@
 //   GET  /roon-card.js   the card itself
 //   GET  /events     Server-Sent Events: "zone" (one per zone update) and "status" (bridge status)
 //   POST /control    ?zone=<zone_id>&cmd=playpause|next|previous|seek|volume&value=<n>
+//   GET  /audiodb    ?artist=<name>   TheAudioDB data (artist images, biography) with a cache.
+//                    Only active if THEAUDIODB_KEY is set; otherwise it answers 503 and the card
+//                    does not ask for it again. Works independently of Roon.
 //
 // The data is exactly what the bridge publishes to MQTT. The browser needs no MQTT access.
 
 const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -83,6 +88,91 @@ function control(q) {
   return 'unknown command';
 }
 
+// ---------- TheAudioDB: proxy + cache ----------
+// GET /audiodb?artist=<name>  ->  200 { "artists": [ ... ] | null }   (fields trimmed to what the card needs)
+//                                 502  TheAudioDB failed (nothing is cached, the card retries later)
+//                                 503  no THEAUDIODB_KEY configured
+// Cache: memory + one JSON file per artist (CACHE_DIR, default <app dir>/cache).
+
+const AD = { key: '', dir: '', interval: 2100 };
+const AD_TTL_FOUND = 30 * 24 * 3600 * 1000;
+const AD_TTL_UNKNOWN = 24 * 3600 * 1000;
+const AD_KEEP = /^(idArtist|strArtist|strArtistAlternate|strMusicBrainzID|strCountry|intBornYear|intFormedYear|strGenre|strArtistThumb|strArtistWideThumb|strArtistFanart\d?|strBiography[A-Z]{0,2})$/;
+const adMem = new Map();
+const adPending = new Map();
+let adQueue = Promise.resolve();
+let adLast = 0;
+
+const adNorm = (s) => String(s || '').toLowerCase().normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+
+function adGetJson(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'roon-card-bridge', Accept: 'application/json' } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch (e) { reject(e); }
+      });
+    });
+    req.setTimeout(8000, () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+// One request at a time with a minimum gap (the free test key is rate limited)
+function adThrottled(fn) {
+  const run = adQueue.then(async () => {
+    const wait = adLast + AD.interval - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    adLast = Date.now();
+    return fn();
+  });
+  adQueue = run.catch(() => {});
+  return run;
+}
+
+function adSlim(a) {
+  const o = {};
+  Object.keys(a).forEach((k) => { if (AD_KEEP.test(k) && a[k]) o[k] = a[k]; });
+  return o;
+}
+
+function adFile(k) {
+  return path.join(AD.dir, 'audiodb-' + crypto.createHash('sha1').update(k).digest('hex') + '.json');
+}
+
+function adRead(k) {
+  let e = adMem.get(k);
+  if (!e) {
+    try { e = JSON.parse(fs.readFileSync(adFile(k), 'utf8')); adMem.set(k, e); } catch (err) { return null; }
+  }
+  return e.until > Date.now() ? e.body : null;
+}
+
+function adWrite(k, e) {
+  adMem.set(k, e);
+  fs.writeFile(adFile(k), JSON.stringify(e), () => {});   // best effort
+}
+
+function adLookup(name) {
+  const k = adNorm(name) || name.toLowerCase();
+  const hit = adRead(k);
+  if (hit) return Promise.resolve(hit);
+  if (adPending.has(k)) return adPending.get(k);
+  const p = adThrottled(() => adGetJson(
+    'https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(AD.key) + '/search.php?s=' + encodeURIComponent(name)
+  )).then((j) => {
+    const list = j && Array.isArray(j.artists) ? j.artists.map(adSlim) : null;
+    const body = { artists: list };
+    adWrite(k, { until: Date.now() + (list ? AD_TTL_FOUND : AD_TTL_UNKNOWN), body: body });
+    return body;
+  }).finally(() => adPending.delete(k));
+  adPending.set(k, p);
+  return p;
+}
+
 // ---------- Static files ----------
 
 function firstExisting(list) {
@@ -94,6 +184,17 @@ function firstExisting(list) {
 exports.start = function (opts) {
   const appDir = opts.appDir;
   const log = opts.log || console.log;
+
+  // TheAudioDB cache: only active with a key
+  AD.key = (process.env.THEAUDIODB_KEY || process.env.theaudiodb_key || '').trim();
+  AD.dir = process.env.CACHE_DIR || path.join(appDir, 'cache');
+  AD.interval = parseInt(process.env.THEAUDIODB_INTERVAL_MS || (AD.key === '123' ? '2100' : '700'), 10);
+  if (AD.key) {
+    try { fs.mkdirSync(AD.dir, { recursive: true }); } catch (e) { log('[!] Cache directory not writable: ' + e.message); }
+    log('[+] TheAudioDB cache on /audiodb (cache dir ' + AD.dir + ')');
+  } else {
+    log('[*] TheAudioDB cache off (THEAUDIODB_KEY not set).');
+  }
 
   const files = {
     '/': () => firstExisting([path.join(appDir, 'web', 'index.html')]),
@@ -132,6 +233,23 @@ exports.start = function (opts) {
       });
       res.writeHead(err ? 400 : 204, err ? { 'Content-Type': 'text/plain' } : {});
       return res.end(err);
+    }
+
+    if (url.pathname === '/audiodb') {
+      // CORS: lets a card on another origin (Home Assistant) use this cache. The data is public TheAudioDB data.
+      const head = { 'Access-Control-Allow-Origin': '*' };
+      if (!AD.key) { res.writeHead(503, head); return res.end('TheAudioDB key not configured'); }
+      const name = (url.searchParams.get('artist') || '').trim();
+      if (req.method !== 'GET' || !name || name.length > 200) { res.writeHead(400, head); return res.end('artist missing'); }
+      adLookup(name).then((body) => {
+        res.writeHead(200, Object.assign({ 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'max-age=3600' }, head));
+        res.end(JSON.stringify(body));
+      }).catch((e) => {
+        log('[-] TheAudioDB "' + name + '": ' + e.message);
+        res.writeHead(502, head);
+        res.end('TheAudioDB request failed');
+      });
+      return;
     }
 
     const finder = files[url.pathname];

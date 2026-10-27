@@ -15,7 +15,9 @@
 //   pairing_required   still not paired after PAIR_HINT_MS: the extension has to be enabled in
 //                      the Roon app (Settings > Extensions). The bridge keeps running and waits.
 //   online             paired with Roon, delivering data
-//   roon_disconnected  connection to the Roon Core was lost (the bridge exits and is restarted by systemd)
+//   roon_disconnected  no connection to the Roon Core (lost, or not reachable). The bridge keeps
+//                      running (MQTT status, web page, TheAudioDB cache) and reconnects every
+//                      ROON_RETRY_MS.
 //   error              unexpected error
 //   offline            bridge stopped (clean shutdown, or last will after an unexpected connection loss)
 //
@@ -119,13 +121,17 @@ const MQTT_PASSWORD = process.env.MQTT_PASSWORD || '';
 const ROON_HOST = process.env.ROON_HOST || '127.0.0.1';
 const ROON_PORT = parseInt(process.env.ROON_PORT || '9330', 10);
 // Time without pairing after which the status switches to "pairing_required"
+// (or "roon_disconnected" if the Core cannot be reached at all)
 const PAIR_HINT_MS = parseInt(process.env.PAIR_HINT_MS || '15000', 10);
+// Pause between attempts to (re)connect to the Roon Core. The bridge never exits because of a missing Core.
+const ROON_RETRY_MS = Math.max(1000, parseInt(process.env.ROON_RETRY_MS || '10000', 10) || 10000);
 const HEARTBEAT_MS = parseInt(process.env.HEARTBEAT_MS || '30000', 10);
 const LOG_LEVEL = (process.env.LOG_LEVEL || 'info').toLowerCase();
 // Port of the optional web page (0 or empty = off), e.g. WEB_PORT=8080
 const WEB_PORT = parseInt(process.env.WEB_PORT || '0', 10);
 // Base URL of the Roon image API as reachable by the browsers, e.g. http://192.168.1.10:9330/api/image
 const IMAGE_URL_BASE = (process.env.IMAGE_URL_BASE || '').trim().replace(/\/+$/, '');
+// Optional TheAudioDB cache of the web page: THEAUDIODB_KEY, CACHE_DIR (read in web.js)
 // =======================================================
 
 const STATUS_TOPIC = `${MQTT_TOPIC}/status`;
@@ -173,6 +179,9 @@ let paired = false;
 let currentStatus = 'starting';
 let shuttingDown = false;
 let coreInfo = null;
+let connectFails = 0;      // failed/closed connections since the last successful pairing
+let retryTimer = null;
+const startedAt = Date.now();
 
 // Status message as JSON. Only technical data that consumers need, nothing sensitive.
 function statusPayload(state) {
@@ -230,6 +239,7 @@ function shutdown(state, code) {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(heartbeatTimer);
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   const force = setTimeout(() => process.exit(code), 2000);
   force.unref();
   setStatus(state, () => {
@@ -266,6 +276,16 @@ process.on('unhandledRejection', (e) => {
 });
 
 // ---------- Roon ----------
+
+// The Roon Core is gone (connection lost or unpairing). The bridge keeps running.
+function roonLost() {
+  paired = false;
+  coreInfo = null;
+  Object.keys(lastTrack).forEach((k) => delete lastTrack[k]);
+  if (web) web.setTransport(null);
+  if (!shuttingDown && currentStatus === 'online') setStatus('roon_disconnected');
+}
+
 const roon = new RoonApi({
   extension_id: 'my.cover.fetcher.local',
   display_name: 'Cover Fetcher LOCAL',
@@ -275,6 +295,8 @@ const roon = new RoonApi({
 
   core_paired: (core) => {
     paired = true;
+    connectFails = 0;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     coreInfo = { name: core.display_name, version: core.display_version };
     logInfo('[+] Paired with Roon.');
     setStatus('online');
@@ -416,10 +438,8 @@ const roon = new RoonApi({
   },
 
   core_unpaired: () => {
-    paired = false;
-    if (web) web.setTransport(null);
-    logInfo('[-] Connection to the Roon Core lost, restarting via systemd.');
-    shutdown('roon_disconnected', 1);
+    logInfo('[-] Connection to the Roon Core lost; the bridge keeps running and reconnects automatically.');
+    roonLost();
   }
 });
 
@@ -428,18 +448,65 @@ roon.init_services({
   required_services: [RoonApiTransport]
 });
 
-logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
-roon.ws_connect({
-  host: ROON_HOST,
-  port: ROON_PORT
-});
+// Connect to the Core. If the connection fails or is lost (onclose), try again after ROON_RETRY_MS.
+// The bridge keeps running meanwhile: MQTT status, web page and the TheAudioDB cache stay available.
+function scheduleReconnect() {
+  if (shuttingDown || retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    connectRoon();
+  }, ROON_RETRY_MS);
+}
 
-// Watchdog: report missing Roon pairing with an actionable message.
-// The bridge does NOT exit here: it publishes "pairing_required" (retained, refreshed by the
-// heartbeat) and keeps waiting. As soon as the extension is enabled in the Roon app,
-// core_paired() fires and the status switches to "online".
+function connectRoon() {
+  if (shuttingDown || paired) return;
+  // Log the first attempt and then only every 30th one, so a missing Core does not flood the log
+  if (connectFails === 0 || connectFails % 30 === 0) {
+    logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
+  }
+  try {
+    roon.ws_connect({
+      host: ROON_HOST,
+      port: ROON_PORT,
+      onclose: () => {
+        if (shuttingDown) return;
+        connectFails++;
+        roonLost();
+        if (connectFails === 1) {
+          logInfo(
+            `[-] No connection to the Roon Core at ${ROON_HOST}:${ROON_PORT}; ` +
+            `retrying every ${Math.round(ROON_RETRY_MS / 1000)} s.`
+          );
+        }
+        // After the start-up grace period an unreachable Core is reported to the consumers
+        if (Date.now() - startedAt >= PAIR_HINT_MS && currentStatus !== 'roon_disconnected') {
+          setStatus('roon_disconnected');
+        }
+        scheduleReconnect();
+      }
+    });
+  } catch (e) {
+    logInfo('[-] Roon connect failed: ' + e.message);
+    connectFails++;
+    scheduleReconnect();
+  }
+}
+
+connectRoon();
+
+// Watchdog: report a missing Roon connection or pairing with an actionable message.
+// The bridge does NOT exit here: it publishes the status (retained, refreshed by the heartbeat)
+// and keeps waiting. As soon as the Core is reachable and the extension is enabled in the
+// Roon app, core_paired() fires and the status switches to "online".
 setTimeout(() => {
-  if (!paired && !shuttingDown) {
+  if (paired || shuttingDown) return;
+  if (connectFails > 0) {
+    console.error(
+      `[-] ERROR: Roon Core not reachable at ${ROON_HOST}:${ROON_PORT}. ` +
+      `Retrying every ${Math.round(ROON_RETRY_MS / 1000)} s.`
+    );
+    setStatus('roon_disconnected');
+  } else {
     console.error(
       '[-] ERROR: Coupling to Roon Core required via Roon app. ' +
       'Open Roon Settings > Extensions and enable/pair this bridge.'

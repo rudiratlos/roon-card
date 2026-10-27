@@ -1,6 +1,7 @@
 /*
  * Roon Player Card
  * Custom Lovelace card: artist image rotation, cover, transport controls, lyrics (LRCLIB), status pill.
+ * Optional: extra artist images and a biography from TheAudioDB (audiodb_key and/or audiodb_url).
  * No dependencies on other cards. Usage: type: custom:roon-player-card
  */
 (function () {
@@ -15,23 +16,31 @@
     roon_url: '',               // optional: image API base URL (default: image_base_url from the bridge status)
     heartbeat_timeout: 90,      // seconds without a new bridge heartbeat before fallback; 0 = off
     clock_url: '/',             // URL used for the clock sync (only the Date header is read)
-    bg_aspects_main: ['12by10', '4by3'],  // aspect ratios for the first artist
-    bg_aspects_other: ['12by10'],         // aspect ratios for further artists
-    bg_interval: 15,            // seconds per image
+    bg_aspects_main: ['12by10', '4by3'], // aspect ratios for the first artist
+    bg_aspects_other: ['12by10'],        // aspect ratios for further artists
+    bg_interval: 15,            // longest time per image in seconds
+    bg_interval_min: 10,        // shortest time per image (used when there are many images)
+    bg_cycle: 90,               // target: one pass through all images takes about this many seconds (0 = always bg_interval)
     zoom_seconds: 30,           // cover zoom hides itself after this time
     cover_fit: 'contain',       // 'contain' = whole cover, 'cover' = fill
     lyrics: true,               // false = lyrics off (same as 'nosongtext')
     lyrics_dim: 0.55,           // dimming of the image behind the lyrics
     lyrics_offset: 0.2,         // seconds: positive = lyrics earlier, negative = later
     format_attr: '',            // attribute path(s) shown as audio format; empty = auto from signal_path
-    // Switches, e.g. options: [nosongtext, noaspect, nostatus]
+    // TheAudioDB: extra artist images and biography. Without audiodb_key (and without audiodb_url) nothing is requested.
+    audiodb_key: '',            // TheAudioDB API key; the card then asks theaudiodb.com directly (e.g. when the bridge is not running)
+    audiodb_url: '',            // optional: cache of the bridge web server, e.g. http://<host>:<port>/audiodb (tried first)
+    audiodb_images: 'extra',    // 'extra' = after the Roon images, 'fallback' = only if Roon has none, 'off'
+    bio_lang: 'EN',             // biography language order, e.g. 'DE,EN' (strBiographyDE first, then strBiography)
+    // Switches, e.g. options: [nobuttons, nosongtext, noaspect, nostatus]
+    //   nobuttons    no player controls (volume, previous/play/next, seek): for displays without touch
+    //   nobio        tapping an artist name does not open the biography
     //   nosongtext   lyrics off
     //   noaspect     do not show the aspect ratio in the pill
     //   nostatus     status pill off
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
     //   noscroll     no marquee for title/artist/album (use "..." instead)
-    //   nosource    do not show the image source (Cover / Artist n/m) in the pill
     //   nostale      disable the "bridge data is outdated" checks (title, status, heartbeat)
     //   debug        tap the pill to show a diagnostic panel
     options: [],
@@ -261,6 +270,132 @@
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
 
+  // ---------- TheAudioDB: artist images and biography ----------
+  // Data comes from TheAudioDB (search.php?s=<artist>): from the cache of the bridge web server (audiodb_url)
+  // and/or directly from theaudiodb.com (audiodb_key). Without either, nothing is requested.
+  let NONWORD;
+  try { NONWORD = new RegExp('[^\\p{L}\\p{N}]+', 'gu'); } catch (e) { NONWORD = /[^a-z0-9\u00c0-\u024f]+/g; }
+  function nzu(s) {
+    return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(NONWORD, '');
+  }
+
+  // Image URLs end up in url('...'): encode characters that could break out of it
+  function safeUrl(u) {
+    return String(u).replace(/[\s'"\\]/g, function (ch) {
+      return '%' + ('0' + ch.charCodeAt(0).toString(16).toUpperCase()).slice(-2);
+    });
+  }
+
+  const AD_KEEP = /^(strArtist|strArtistAlternate|strCountry|intBornYear|intFormedYear|strGenre|strArtistThumb|strArtistFanart\d?|strBiography[A-Z]{0,2})$/;
+  const AD_MEM = new Map();      // key -> { rec, until }   rec = artist object, or null = unknown artist
+  const AD_PENDING = new Map();  // key -> Promise
+  const AD_FAIL = new Map();     // key -> time of the next attempt after an error
+  const AD_PROXY_OFF = {};       // proxy URL -> true once it reported "no key configured"
+  const AD_OK_MS = 30 * 86400000, AD_UNKNOWN_MS = 86400000, AD_RETRY_MS = 600000;
+
+  function adLoadStored(k) {
+    try {
+      const e = JSON.parse(localStorage.getItem('roon-card:audiodb:' + k) || 'null');
+      if (e && e.until > Date.now()) { AD_MEM.set(k, e); return e; }
+    } catch (x) { /* storage not available */ }
+    return null;
+  }
+  function adStore(k, e) {
+    const put = function () { localStorage.setItem('roon-card:audiodb:' + k, JSON.stringify(e)); };
+    try { put(); } catch (x) {
+      try {   // quota full: drop the cached artists and try once more
+        Object.keys(localStorage).filter(function (n) { return n.indexOf('roon-card:audiodb:') === 0; })
+          .forEach(function (n) { localStorage.removeItem(n); });
+        put();
+      } catch (y) { /* memory cache still works */ }
+    }
+  }
+
+  function audiodbEnabled(c) {
+    return !!c.audiodb_key || (!!c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]);
+  }
+
+  // Bridge cache first (if configured), then TheAudioDB directly (only with a key)
+  async function audiodbRequest(c, name) {
+    let list = null;
+    if (c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]) {
+      try {
+        const r = await fetch(c.audiodb_url + (c.audiodb_url.indexOf('?') < 0 ? '?' : '&') + 'artist=' + encodeURIComponent(name));
+        if (r.status === 503) AD_PROXY_OFF[c.audiodb_url] = true;          // server has no key: stop asking
+        else if (r.ok) list = ((await r.json()) || {}).artists || [];
+      } catch (e) { /* proxy not reachable */ }
+    }
+    if (list === null && c.audiodb_key) {
+      const r = await fetch('https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(c.audiodb_key) +
+        '/search.php?s=' + encodeURIComponent(name));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      list = ((await r.json()) || {}).artists || [];
+    }
+    if (list === null) throw new Error('no source');
+    const want = nzu(name);
+    const a = list.filter(function (x) { return nzu(x.strArtist) === want; })[0] ||
+      list.filter(function (x) {
+        return String(x.strArtistAlternate || '').split(';').some(function (n) { return nzu(n) === want; });
+      })[0];
+    if (!a) return null;
+    const o = {};
+    Object.keys(a).forEach(function (k) { if (AD_KEEP.test(k) && a[k]) o[k] = a[k]; });
+    return o;
+  }
+
+  // -> { state: 'ok', rec } | { state: 'loading', p } | { state: 'error' } | { state: 'none' }
+  function audiodbRecord(c, name) {
+    const k = nzu(name);
+    if (!k || !audiodbEnabled(c)) return { state: 'none' };
+    const now = Date.now();
+    const e = AD_MEM.get(k) || (c.audiodb_key ? adLoadStored(k) : null);
+    if (e && e.until > now) return { state: 'ok', rec: e.rec };
+    if (AD_PENDING.has(k)) return { state: 'loading', p: AD_PENDING.get(k) };
+    if ((AD_FAIL.get(k) || 0) > now) return { state: 'error' };
+    const p = audiodbRequest(c, name).then(function (rec) {
+      const ent = { rec: rec, until: Date.now() + (rec ? AD_OK_MS : AD_UNKNOWN_MS) };
+      AD_MEM.set(k, ent);
+      if (c.audiodb_key) adStore(k, ent);
+    }).catch(function () {
+      AD_FAIL.set(k, Date.now() + AD_RETRY_MS);
+    }).then(function () { AD_PENDING.delete(k); });
+    AD_PENDING.set(k, p);
+    return { state: 'loading', p: p };
+  }
+
+  // Images in the order thumb, fanart, fanart2..4
+  function audiodbImages(rec) {
+    const out = [];
+    if (!rec) return out;
+    [['strArtistThumb', 'thumb'], ['strArtistFanart', 'fanart'], ['strArtistFanart2', 'fanart'],
+     ['strArtistFanart3', 'fanart'], ['strArtistFanart4', 'fanart']].forEach(function (p) {
+      if (rec[p[0]] && /^https?:\/\//i.test(rec[p[0]])) out.push({ u: safeUrl(rec[p[0]]), kind: p[1] });
+    });
+    return out;
+  }
+
+  function parseLangs(v) {
+    let l = v;
+    if (typeof l === 'string') l = l.split(/[\s,;]+/);
+    if (!Array.isArray(l)) l = [];
+    l = l.map(function (x) { return String(x).trim().toUpperCase(); }).filter(Boolean);
+    return l.length ? l : ['EN'];
+  }
+
+  // TheAudioDB: English = strBiography, others = strBiography<CODE> (a few codes differ from ISO)
+  const BIO_FIELDS = { EN: ['strBiographyEN', 'strBiography'], JA: ['strBiographyJP'], ZH: ['strBiographyCN'],
+    SV: ['strBiographySE'], HE: ['strBiographyIL'], NB: ['strBiographyNO'], NN: ['strBiographyNO'] };
+  function pickBio(rec, langs) {
+    for (let i = 0; i < langs.length; i++) {
+      const fields = BIO_FIELDS[langs[i]] || ['strBiography' + langs[i]];
+      for (let j = 0; j < fields.length; j++) {
+        const v = rec[fields[j]];
+        if (v && String(v).trim()) return { text: String(v).trim(), lang: langs[i] };
+      }
+    }
+    return null;
+  }
+
   // ---------- The card ----------
   class RoonPlayerCard extends HTMLElement {
     constructor() {
@@ -282,6 +417,7 @@
       if (!cfg.status_sensor) cfg.status_sensor = 'sensor.roon_bridge_status';
       this._cfg = cfg;
       this._opts = parseOpts(cfg);
+      this._langs = parseLangs(cfg.bio_lang);
       this._stopTimers();
       this._build();
       if (this.isConnected) this._startTimers();
@@ -311,7 +447,6 @@
       }
       syncClock(this._cfg.clock_url);
     }
-
     _stopTimers() {
       if (this._timer) { clearInterval(this._timer); this._timer = null; }
       if (this._ro) { this._ro.disconnect(); this._ro = null; }
@@ -324,14 +459,16 @@
 
     // ----- DOM -----
     _build() {
-      const c = this._cfg;
+      const c = this._cfg, o = this._opts;
       const mh = c.max_height;
+      // Without player controls the bottom bar only needs room for the cover (72 px) plus padding
+      const barH = o.nobuttons ? Math.min(Number(c.bar_h) || 112, 96) : c.bar_h;
       this.shadowRoot.innerHTML = `
 <style>
   :host { display:block; container-type:inline-size; }
   ha-card { position:relative; overflow:hidden; width:100%; box-sizing:border-box; padding:0; margin:0;
     background:rgb(42,42,46); border-radius:16px; height:${mh}; height:min(${mh},100cqw);
-    --bar-h:${c.bar_h}px; --pad:${c.pad}px; }
+    --bar-h:${barH}px; --pad:${c.pad}px; }
   .bg { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); overflow:hidden; z-index:1;
     cursor:pointer; touch-action:manipulation; background:rgb(22,22,22); }
   .bgl { position:absolute; top:0; left:0; right:0; bottom:0; background-size:cover; background-repeat:no-repeat;
@@ -350,6 +487,13 @@
     box-sizing:border-box; padding:10px; border-radius:8px; background:rgba(0,0,0,0.82); color:#fff;
     font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all;
     cursor:pointer; touch-action:manipulation; }
+  .bio { position:absolute; top:0; left:0; right:0; bottom:0; z-index:3; display:none; overflow-y:auto;
+    box-sizing:border-box; padding:18px 20px 44px; background:rgba(0,0,0,0.86); color:#fff;
+    font-family:Roboto,'Helvetica Neue',Arial,sans-serif; font-size:0.95rem; line-height:1.45;
+    cursor:pointer; touch-action:pan-y; }
+  .bio h3 { margin:0 0 4px; font-size:1.3rem; font-weight:700; }
+  .bio p { margin:0 0 10px; }
+  .bio p.m { opacity:0.65; font-size:0.8rem; }
   .zoom { position:absolute; top:0; left:0; right:0; bottom:var(--bar-h); z-index:5; display:none;
     align-items:center; justify-content:center; background:rgba(0,0,0,0.82);
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer; touch-action:manipulation; }
@@ -374,6 +518,8 @@
     text-overflow:ellipsis; }
   .tw span, .sw span { display:inline-block; }
   .ctl { display:flex; align-items:center; margin-top:-2px; }
+  .nb .ctl { display:none; }
+  .nb .seek { cursor:default; }
   .vicon { display:flex; align-items:center; flex-shrink:0; margin-left:-3px; }
   .btns { display:flex; align-items:center; gap:26px; flex-shrink:0; }
   .btn { cursor:pointer; display:flex; align-items:center; justify-content:center; padding:6px; margin:-6px;
@@ -394,12 +540,13 @@
     overflow:hidden; pointer-events:none; }
   .seek-bar { height:100%; background:#f29d38; width:0%; }
 </style>
-<ha-card>
+<ha-card class="${o.nobuttons ? 'nb' : ''}">
   <div class="bg" id="bg">
     <div class="bgl" id="bga"></div>
     <div class="bgl" id="bgb"></div>
     <div class="lyr" id="lyr"><div class="lyr-in" id="lyrIn"></div></div>
     <div class="dbg" id="dbg"></div>
+    <div class="bio" id="bio"></div>
     <div class="pill" id="pill"></div>
   </div>
   <div class="zoom" id="zoom"><div class="zimg" id="zimg"></div></div>
@@ -430,8 +577,8 @@
       const $ = (id) => this.shadowRoot.getElementById(id);
       this._el = {
         bg: $('bg'), bga: $('bga'), bgb: $('bgb'), lyr: $('lyr'), lyrIn: $('lyrIn'), pill: $('pill'), dbg: $('dbg'),
-        zoom: $('zoom'), zimg: $('zimg'), cover: $('cover'), tw: $('tw'), title: $('title'), time: $('time'),
-        sw: $('sw'), sub: $('sub'), vol: $('vol'), prev: $('prev'), pp: $('pp'), next: $('next'),
+        bio: $('bio'), zoom: $('zoom'), zimg: $('zimg'), cover: $('cover'), tw: $('tw'), title: $('title'),
+        time: $('time'), sw: $('sw'), sub: $('sub'), vol: $('vol'), prev: $('prev'), pp: $('pp'), next: $('next'),
         seek: $('seek'), sbar: $('sbar')
       };
       this._front = this._el.bga;
@@ -446,8 +593,8 @@
       this._volHold = 0; this._volSent = null; this._pos = { base: 0, at: Date.now(), playing: false, dur: 0 };
       this._hbTs = null; this._hbAt = Date.now(); this._evalAt = 0;
       this._artFail = false; this._dbgOpen = false;
+      this._bioIdx = -1; this._bioKey = null; this._adW = {};
       this._d = null;
-
       this._bind();
       this._built = true;
     }
@@ -461,11 +608,18 @@
       onTap(e.pp, () => this._svc('media_play_pause'));
       onTap(e.next, () => this._svc('media_next_track'));
       onTap(e.seek, (ev) => {
-        if (!this._pos.dur) return;
+        if (this._opts.nobuttons || !this._pos.dur) return;
         const r = e.seek.getBoundingClientRect();
         const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
         this._svc('media_seek', { seek_position: f * this._pos.dur });
       });
+
+      // Biography: tap an artist name to open it, tap the panel to close it
+      onTap(e.sw, (ev) => {
+        const n = ev.target && ev.target.closest ? ev.target.closest('.ra') : null;
+        if (n) this._toggleBio(parseInt(n.getAttribute('data-i'), 10));
+      });
+      onTap(e.bio, () => this._toggleBio(-1));
 
       // Debug panel: tap the pill to open, tap the panel to close
       const toggleDbg = () => {
@@ -538,6 +692,7 @@
       const ib = imageBase(c, bi);
       const base = ib.url;
       const mixed = !!base && location.protocol === 'https:' && base.indexOf('http:') === 0;
+
       const json = (c.sensor && hass.states[c.sensor] && hass.states[c.sensor].attributes) || {};
       const np = stale ? {} : (json.now_playing || {});
       const album = np.album || a.media_album_name || '';
@@ -557,18 +712,39 @@
         });
       });
 
+      // TheAudioDB: extra images (requests run in the background; the card updates when the data arrives).
+      // This works without the bridge too: the artist names come from the media player.
+      const adInfo = [];
+      let extCount = 0;
+      if (audiodbEnabled(c)) {
+        const mode = String(c.audiodb_images || 'extra').toLowerCase();
+        const wantImg = mode === 'extra' || (mode === 'fallback' && !keys.length);
+        names.slice(0, 3).forEach((n, ai) => {
+          const r = audiodbRecord(c, n);
+          adInfo.push(n + ': ' + r.state + (r.state === 'ok' && !r.rec ? ' (unknown)' : ''));
+          if (r.state === 'loading') this._adWait(nzu(n), r.p);
+          if (wantImg && r.state === 'ok') {
+            audiodbImages(r.rec).forEach(function (im) {
+              slides.push({ u: im.u, m: 'fill', kind: 'artist', ai: ai, asp: 'audiodb ' + im.kind, ext: true });
+              extCount++;
+            });
+          }
+        });
+      }
+
       this._d = {
-        stale: stale, reason: reason, bi: bi, names: names, nKeys: keys.length, fmt: fmt,
-        base: base, baseSrc: ib.src, mixed: mixed,
+        stale: stale, reason: reason, bi: bi, names: names, nKeys: Math.max(keys.length, extCount ? names.length : 0),
+        fmt: fmt, base: base, baseSrc: ib.src, mixed: mixed, adInfo: adInfo.join('; '),
         noUrl: !!c.sensor && !base && !stale && !!np.image_key,
         statusMissing: this._statusExplicit && !bi.exists
       };
 
-      // New track: close the cover zoom
+      // New track: close the cover zoom and the biography
       const trackKey = title + '|' + artist;
       if (trackKey !== this._trackKey) {
         this._trackKey = trackKey;
         if (this._zoom && this._zoomKey !== trackKey) this._setZoom(false);
+        if (this._bioIdx >= 0) { this._bioIdx = -1; this._renderBio(); }
       }
 
       // Title and "Artist - Album"
@@ -619,23 +795,30 @@
 
       // Image rotation: restart when the set of images changes
       const bgKey = slides.map(function (s) { return s.u; }).join('|');
+      const prevKey = this._bgKey;
       this._slides = slides;
-      if (bgKey !== this._bgKey) {
+      if (bgKey !== prevKey) {
+        // Only new images added at the end (e.g. TheAudioDB data arrived later): keep the current image and timing
+        const appended = !!prevKey && bgKey.indexOf(prevKey + '|') === 0;
         this._bgKey = bgKey;
-        this._bgIdx = 0;
-        this._bgLast = Date.now();
-        this._artFail = false;
-        this._showSlide(0, true);
-        // Probe the first artist image once to detect an unreachable image server
-        const probe = slides.filter(function (s) { return s.kind === 'artist'; })[0];
-        if (probe) {
-          const im = new Image();
-          im.onerror = () => { if (bgKey === this._bgKey) { this._artFail = true; this._applyMeta(); } };
-          im.src = probe.u;
+        if (!appended) {
+          this._bgIdx = 0;
+          this._bgLast = Date.now();
+          this._artFail = false;
+          this._showSlide(0, true);
+
+          // Probe the first Roon artist image once to detect an unreachable image server
+          const probe = slides.filter(function (s) { return s.kind === 'artist' && !s.ext; })[0];
+          if (probe) {
+            const im = new Image();
+            im.onerror = () => { if (bgKey === this._bgKey) { this._artFail = true; this._applyMeta(); } };
+            im.src = probe.u;
+          }
         }
       }
 
       this._updateLyrics(title, artist, album, this._pos.dur);
+      if (this._bioIdx >= 0) this._renderBio();
       this._applyMeta();
     }
 
@@ -644,15 +827,13 @@
       const o = this._opts, el = this._el, d = this._d;
       if (!d) return;
       const s = this._slides.length ? this._slides[this._bgIdx % this._slides.length] : null;
-      // Bridge is running but the extension is not enabled in the Roon app yet
-      const pairing = d.bi.status === 'pairing_required';
       const p = [];
       if (!o.nostatus) {
         if (s) {
           if (s.kind === 'artist') {
-            if (!o.nosource) p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
+            p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
             if (!o.noaspect) p.push(s.asp);
-          } else if (!o.nosource) {
+          } else {
             p.push('Cover');
           }
         }
@@ -661,8 +842,7 @@
         else if (this._artFail) p.push('artwork unreachable');
         if (d.stale) {
           p.push('Fallback');
-          if (pairing) p.push('Roon-Kopplung nötig: Einstellungen › Erweiterungen aktivieren');
-          else if (d.reason.indexOf('bridge') === 0) p.push(d.reason);
+          if (d.reason.indexOf('bridge') === 0) p.push(d.reason);
         }
         if (d.statusMissing) p.push('status sensor missing');
         if (d.fmt && !o.noformat) p.push(d.fmt);
@@ -671,9 +851,6 @@
       if (o.debug && !txt) txt = 'debug';
       el.pill.textContent = txt;
       el.pill.style.display = txt ? 'block' : 'none';
-      el.pill.style.background = (pairing && !o.nostatus) ? 'rgba(200,60,40,0.9)' : '';
-      el.pill.style.maxWidth = 'calc(100% - 20px)';
-      el.pill.style.textAlign = 'right';
 
       const act = (!o.nounderline && s && s.kind === 'artist' && d.names.length > 1) ? s.ai : -1;
       el.sub.querySelectorAll('.ra').forEach(function (n) {
@@ -707,13 +884,76 @@
         'page protocol: ' + location.protocol + (d.mixed ? ' (mixed content!)' : ''),
         'artwork probe: ' + (this._artFail ? 'FAILED' : 'ok / not tested'),
         'slides: ' + this._slides.length + ' (now: ' + (this._bgIdx + 1) + ')',
+        'image interval: ' + Math.round(this._interval() / 1000) + ' s',
         'current image: ' + (cur ? cur.u : '(none)'),
-        'format: ' + (d.fmt || '(none)')
+        'format: ' + (d.fmt || '(none)'),
+        '',
+        'audiodb: ' + (audiodbEnabled(c)
+          ? ((c.audiodb_url ? 'cache ' + c.audiodb_url + (c.audiodb_key ? ' + ' : '') : '') + (c.audiodb_key ? 'direct' : ''))
+          : 'off') + (d.adInfo ? ' | ' + d.adInfo : '')
       ];
       this._el.dbg.textContent = lines.join('\n');
     }
 
+    // ----- Biography (TheAudioDB) -----
+    _adWait(k, p) {
+      if (this._adW[k]) return;
+      this._adW[k] = true;
+      const done = () => { delete this._adW[k]; if (this._hass && this._built) this._update(); };
+      p.then(done, done);
+    }
+
+    _toggleBio(i) {
+      if (!audiodbEnabled(this._cfg) || this._opts.nobio) return;
+      this._bioIdx = (i < 0 || i === this._bioIdx) ? -1 : i;
+      this._bioKey = null;
+      this._renderBio();
+    }
+
+    _renderBio() {
+      const el = this._el.bio, d = this._d, i = this._bioIdx;
+      const name = (d && i >= 0) ? d.names[i] : '';
+      if (!name) { el.style.display = 'none'; el.textContent = ''; this._bioKey = null; return; }
+      const r = audiodbRecord(this._cfg, name);
+      if (r.state === 'loading') this._adWait(nzu(name), r.p);
+      const bio = (r.state === 'ok' && r.rec) ? pickBio(r.rec, this._langs) : null;
+      const key = [name, r.state, bio ? bio.lang + bio.text.length : ''].join('|');
+      if (key === this._bioKey) return;       // nothing changed: keep the scroll position
+      this._bioKey = key;
+      el.textContent = '';
+      const add = function (tag, txt, cls) {
+        const n = document.createElement(tag);
+        if (cls) n.className = cls;
+        n.textContent = txt;
+        el.appendChild(n);
+      };
+      const rec = r.rec || {};
+      add('h3', rec.strArtist || name);
+      const meta = [rec.strCountry, rec.strGenre,
+        rec.intBornYear ? 'born ' + rec.intBornYear : (rec.intFormedYear ? 'formed ' + rec.intFormedYear : '')]
+        .filter(Boolean).join(' \u00b7 ');
+      if (meta) add('p', meta, 'm');
+      if (bio) {
+        bio.text.split(/\r?\n+/).forEach(function (par) { par = fixMojibake(par.trim()); if (par) add('p', par); });
+        add('p', 'TheAudioDB \u00b7 ' + bio.lang, 'm');
+      } else {
+        add('p', r.state === 'loading' ? 'Loading...' : r.state === 'error' ? 'TheAudioDB not reachable'
+          : 'No biography available (' + this._langs.join(', ') + ')', 'm');
+      }
+      el.style.display = 'block';
+      el.scrollTop = 0;
+    }
+
     // ----- Image rotation -----
+    // Seconds per image: shorter with many images, so that one pass takes about bg_cycle seconds
+    _interval() {
+      const c = this._cfg, n = this._slides.length || 1;
+      const max = Number(c.bg_interval) || 15;
+      const min = Math.min(max, Number(c.bg_interval_min) || 10);
+      const cyc = Number(c.bg_cycle) || 0;
+      return (cyc > 0 ? Math.max(min, Math.min(max, cyc / n)) : max) * 1000;
+    }
+
     _applyLayer(layer, s) {
       const fit = s.m === 'fit';
       layer.style.backgroundImage = "url('" + s.u + "')";
@@ -798,7 +1038,8 @@
 
     // ----- 250 ms loop: progress, lyrics, rotation, zoom timeout, heartbeat re-check -----
     _tick() {
-      const el = this._el, c = this._cfg;
+      const el = this._el;
+      const c = this._cfg;
       if (!this._hass) return;
 
       // Re-evaluate every 5 s even without state changes, so a silent bridge is detected
@@ -812,8 +1053,8 @@
       el.sbar.style.width = pct + '%';
       el.time.textContent = dur > 0 ? fmtTime(pos) + ' / ' + fmtTime(dur) : '';
 
-      // Image rotation
-      if (this._slides.length > 1 && Date.now() - this._bgLast >= Number(c.bg_interval) * 1000) {
+      // Image rotation (the interval gets shorter with many images)
+      if (this._slides.length > 1 && Date.now() - this._bgLast >= this._interval()) {
         this._bgLast = Date.now();
         this._showSlide((this._bgIdx + 1) % this._slides.length, false);
       }
