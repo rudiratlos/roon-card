@@ -290,22 +290,23 @@
   const AD_KEEP = /^(strArtist|strArtistAlternate|strCountry|intBornYear|intFormedYear|strGenre|strArtistThumb|strArtistFanart\d?|strBiography[A-Z]{0,2})$/;
   const AD_MEM = new Map();      // key -> { rec, until }   rec = artist object, or null = unknown artist
   const AD_PENDING = new Map();  // key -> Promise
+  const AD_ERR = new Map();      // key -> last error message
   const AD_FAIL = new Map();     // key -> time of the next attempt after an error
   const AD_PROXY_OFF = {};       // proxy URL -> true once it reported "no key configured"
-  const AD_OK_MS = 30 * 86400000, AD_UNKNOWN_MS = 86400000, AD_RETRY_MS = 600000;
+  const AD_OK_MS = 30 * 86400000, AD_UNKNOWN_MS = 3600000, AD_RETRY_MS = 600000;
 
   function adLoadStored(k) {
     try {
-      const e = JSON.parse(localStorage.getItem('roon-card:audiodb:' + k) || 'null');
+      const e = JSON.parse(localStorage.getItem('roon-card:audiodb2:' + k) || 'null');
       if (e && e.until > Date.now()) { AD_MEM.set(k, e); return e; }
     } catch (x) { /* storage not available */ }
     return null;
   }
   function adStore(k, e) {
-    const put = function () { localStorage.setItem('roon-card:audiodb:' + k, JSON.stringify(e)); };
+    const put = function () { localStorage.setItem('roon-card:audiodb2:' + k, JSON.stringify(e)); };
     try { put(); } catch (x) {
       try {   // quota full: drop the cached artists and try once more
-        Object.keys(localStorage).filter(function (n) { return n.indexOf('roon-card:audiodb:') === 0; })
+        Object.keys(localStorage).filter(function (n) { return n.indexOf('roon-card:audiodb') === 0; })
           .forEach(function (n) { localStorage.removeItem(n); });
         put();
       } catch (y) { /* memory cache still works */ }
@@ -326,7 +327,9 @@
     return v;
   }
 
-  // Bridge cache first (if configured), then TheAudioDB directly (only with a key)
+  // Bridge cache first (if configured), then TheAudioDB directly (only with a key).
+  // Every source is tried for every spelling variant; an empty answer from the cache
+  // does not stop the direct request.
   async function audiodbRequest(c, name) {
     const want = nzu(name);
     const match = function (list) {
@@ -335,29 +338,28 @@
           return String(x.strArtistAlternate || '').split(';').some(function (n) { return nzu(n) === want; });
         })[0];
     };
-    let reached = false, found = null;
     const variants = adVariants(name);
+    let reached = false, found = null, lastErr = '';
     for (let i = 0; i < variants.length && !found; i++) {
       const q = variants[i];
-      let list = null;
       if (c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]) {
         try {
           const r = await fetch(c.audiodb_url + (c.audiodb_url.indexOf('?') < 0 ? '?' : '&') + 'artist=' + encodeURIComponent(q));
           if (r.status === 503) AD_PROXY_OFF[c.audiodb_url] = true;          // server has no key: stop asking
-          else if (r.ok) list = ((await r.json()) || {}).artists || [];
-        } catch (e) { /* proxy not reachable */ }
+          else if (r.ok) { reached = true; found = match(((await r.json()) || {}).artists || []); }
+          else lastErr = 'cache HTTP ' + r.status;
+        } catch (e) { lastErr = 'cache: ' + (e && e.message); }
       }
-      if (list === null && c.audiodb_key) {
-        const r = await fetch('https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(c.audiodb_key) +
-          '/search.php?s=' + encodeURIComponent(q));
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        list = ((await r.json()) || {}).artists || [];
+      if (!found && c.audiodb_key) {
+        try {
+          const r = await fetch('https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(c.audiodb_key) +
+            '/search.php?s=' + encodeURIComponent(q));
+          if (r.ok) { reached = true; found = match(((await r.json()) || {}).artists || []); }
+          else lastErr = 'direct HTTP ' + r.status;
+        } catch (e) { lastErr = 'direct: ' + (e && e.message); }
       }
-      if (list === null) continue;
-      reached = true;
-      found = match(list);
     }
-    if (!reached) throw new Error('no source');
+    if (!reached) throw new Error(lastErr || 'no source');
     if (!found) return null;
     const o = {};
     Object.keys(found).forEach(function (k) { if (AD_KEEP.test(k) && found[k]) o[k] = found[k]; });
@@ -376,8 +378,9 @@
     const p = audiodbRequest(c, name).then(function (rec) {
       const ent = { rec: rec, until: Date.now() + (rec ? AD_OK_MS : AD_UNKNOWN_MS) };
       AD_MEM.set(k, ent);
-      if (c.audiodb_key) adStore(k, ent);
-    }).catch(function () {
+      if (c.audiodb_key && rec) adStore(k, ent);
+    }).catch(function (err) {
+      AD_ERR.set(k, String((err && err.message) || err));
       AD_FAIL.set(k, Date.now() + AD_RETRY_MS);
     }).then(function () { AD_PENDING.delete(k); });
     AD_PENDING.set(k, p);
@@ -742,7 +745,8 @@
         const wantImg = mode === 'extra' || (mode === 'fallback' && !keys.length);
         names.slice(0, 3).forEach((n, ai) => {
           const r = audiodbRecord(c, n);
-          adInfo.push(n + ': ' + r.state + (r.state === 'ok' && !r.rec ? ' (unknown)' : ''));
+          adInfo.push(n + ': ' + r.state + (r.state === 'ok' && !r.rec ? ' (unknown)' : '') +
+            (r.state === 'error' ? ' (' + (AD_ERR.get(nzu(n)) || '?') + ')' : ''));
           if (r.state === 'loading') this._adWait(nzu(n), r.p);
           if (wantImg && r.state === 'ok') {
             audiodbImages(r.rec).forEach(function (im) {
