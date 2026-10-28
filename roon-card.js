@@ -316,31 +316,51 @@
     return !!c.audiodb_key || (!!c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]);
   }
 
+  // Spelling variants for the search request (typographic apostrophe, no apostrophe)
+  function adVariants(name) {
+    const v = [name];
+    const a = name.replace(/[\u2018\u2019\u02BC\u00B4`]/g, "'");
+    if (a !== name) v.push(a);
+    const b = a.replace(/'/g, '');
+    if (b !== a) v.push(b);
+    return v;
+  }
+
   // Bridge cache first (if configured), then TheAudioDB directly (only with a key)
   async function audiodbRequest(c, name) {
-    let list = null;
-    if (c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]) {
-      try {
-        const r = await fetch(c.audiodb_url + (c.audiodb_url.indexOf('?') < 0 ? '?' : '&') + 'artist=' + encodeURIComponent(name));
-        if (r.status === 503) AD_PROXY_OFF[c.audiodb_url] = true;          // server has no key: stop asking
-        else if (r.ok) list = ((await r.json()) || {}).artists || [];
-      } catch (e) { /* proxy not reachable */ }
-    }
-    if (list === null && c.audiodb_key) {
-      const r = await fetch('https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(c.audiodb_key) +
-        '/search.php?s=' + encodeURIComponent(name));
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      list = ((await r.json()) || {}).artists || [];
-    }
-    if (list === null) throw new Error('no source');
     const want = nzu(name);
-    const a = list.filter(function (x) { return nzu(x.strArtist) === want; })[0] ||
-      list.filter(function (x) {
-        return String(x.strArtistAlternate || '').split(';').some(function (n) { return nzu(n) === want; });
-      })[0];
-    if (!a) return null;
+    const match = function (list) {
+      return list.filter(function (x) { return nzu(x.strArtist) === want; })[0] ||
+        list.filter(function (x) {
+          return String(x.strArtistAlternate || '').split(';').some(function (n) { return nzu(n) === want; });
+        })[0];
+    };
+    let reached = false, found = null;
+    const variants = adVariants(name);
+    for (let i = 0; i < variants.length && !found; i++) {
+      const q = variants[i];
+      let list = null;
+      if (c.audiodb_url && !AD_PROXY_OFF[c.audiodb_url]) {
+        try {
+          const r = await fetch(c.audiodb_url + (c.audiodb_url.indexOf('?') < 0 ? '?' : '&') + 'artist=' + encodeURIComponent(q));
+          if (r.status === 503) AD_PROXY_OFF[c.audiodb_url] = true;          // server has no key: stop asking
+          else if (r.ok) list = ((await r.json()) || {}).artists || [];
+        } catch (e) { /* proxy not reachable */ }
+      }
+      if (list === null && c.audiodb_key) {
+        const r = await fetch('https://www.theaudiodb.com/api/v1/json/' + encodeURIComponent(c.audiodb_key) +
+          '/search.php?s=' + encodeURIComponent(q));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        list = ((await r.json()) || {}).artists || [];
+      }
+      if (list === null) continue;
+      reached = true;
+      found = match(list);
+    }
+    if (!reached) throw new Error('no source');
+    if (!found) return null;
     const o = {};
-    Object.keys(a).forEach(function (k) { if (AD_KEEP.test(k) && a[k]) o[k] = a[k]; });
+    Object.keys(found).forEach(function (k) { if (AD_KEEP.test(k) && found[k]) o[k] = found[k]; });
     return o;
   }
 
