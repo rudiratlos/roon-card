@@ -17,6 +17,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 
 const zones = {};        // zone_id -> last payload
@@ -162,6 +163,37 @@ function adWrite(k, e) {
   });
 }
 
+// Removes expired cache files and expired memory entries. Runs shortly after the start and then once a day.
+// Only files named audiodb-<40 hex characters>.json are touched. Files written in the last minute are skipped,
+// because they may still be in the middle of being written.
+async function adCleanup() {
+  const now = Date.now();
+  adMem.forEach((e, k) => { if (e.until <= now) adMem.delete(k); });
+  let names;
+  try {
+    names = (await fsp.readdir(AD.dir)).filter((n) => /^audiodb-[0-9a-f]{40}\.json$/.test(n));
+  } catch (e) {
+    return;
+  }
+  let removed = 0;
+  for (const n of names) {
+    const f = path.join(AD.dir, n);
+    try {
+      const st = await fsp.stat(f);
+      if (now - st.mtimeMs < 60000) continue;
+      let expired;
+      try {
+        expired = !(JSON.parse(await fsp.readFile(f, 'utf8')).until > now);
+      } catch (e) {
+        expired = true;   // cannot be read as JSON: damaged
+      }
+      if (expired) { await fsp.unlink(f); removed++; }
+    } catch (e) { /* file vanished or is not accessible: skip it */ }
+  }
+  AD.log('[*] TheAudioDB cache cleanup: ' + removed + ' of ' + names.length +
+    ' files removed (expired or damaged), ' + (names.length - removed) + ' kept');
+}
+
 function adLookup(name) {
   const k = adNorm(name) || name.toLowerCase();
   const hit = adRead(k);
@@ -206,6 +238,10 @@ exports.start = function (opts) {
     }
     log('[' + (state === 'writable' ? '+' : '!') + '] TheAudioDB cache on /audiodb: dir ' + AD.dir + ' ' + state +
       ', ' + (AD.key === '123' ? 'test key' : 'own key') + ', min. ' + AD.interval + ' ms between requests');
+    if (state === 'writable') {
+      setTimeout(adCleanup, 5000).unref();
+      setInterval(adCleanup, 24 * 3600 * 1000).unref();
+    }
   } else {
     log('[*] TheAudioDB cache off (THEAUDIODB_KEY not set).');
   }

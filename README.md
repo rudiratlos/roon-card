@@ -304,7 +304,7 @@ The card can add images and a biography from [TheAudioDB](https://www.theaudiodb
 
 If you configure both `audiodb_url` and `audiodb_key`, the card asks the bridge first and only asks theaudiodb.com directly if the bridge cannot be reached. This also works without the roon bridge, because the card only needs the artist name of the media player.
 
-**Key and limits:** TheAudioDB offers a free test key (`123`) with strict rate limits that all users share. For regular use, get your own key at theaudiodb.com. Every artist is requested only once: the browser (direct mode) or the bridge (cache) remembers the answer for 30 days, unknown artists for one day. After an error the card tries again after 10 minutes.
+**Key and limits:** TheAudioDB offers a free test key (`123`) with strict rate limits that all users share. For regular use, get your own key at theaudiodb.com. Every artist is requested only once: the browser (direct mode) or the bridge (cache) remembers the answer for 30 days, unknown artists for one day. After an error the card tries again after 10 minutes. The bridge deletes expired cache files by itself, shortly after the start and then once a day.
 
 **Privacy:** the names of the artists of the current track (up to three) are sent to theaudiodb.com, from the browser of the display (direct mode) or from the bridge (cache). In direct mode the key is part of the dashboard configuration and visible to everybody who can read it. With the bridge cache the key stays on the server.
 
@@ -461,6 +461,7 @@ What the lines tell you:
 | `Configuration loaded from ...`               | which env file is used. Only the first file found is read, see [Configuration](#configuration) |
 | `TheAudioDB cache on /audiodb: dir ... writable` | the cache is active. `NOT writable` (marked with `[!]`) means the directory cannot be written: the cache then only lives in memory until the next restart |
 | `TheAudioDB cache off`                        | `THEAUDIODB_KEY` is not set, the bridge does not offer TheAudioDB data                   |
+| `TheAudioDB cache cleanup: 2 of 40 files removed ...` | the daily cleanup: how many cache files were expired or damaged and have been deleted. It first appears a few seconds after the start |
 | `No connection to the Roon Core ...`          | the Core cannot be reached. The bridge keeps running and tries again every `ROON_RETRY_MS` |
 
 The cache directory has to be writable for the user that runs the service. If the service uses systemd sandboxing (`ProtectSystem=`), the directory must also be listed in `ReadWritePaths=` in the service file.
@@ -490,7 +491,7 @@ Only the first file that exists is read, the others are ignored. Variables alrea
 | `IMAGE_URL_BASE`  | Empty                                          | Optional base URL for the Roon image API, as reachable by the browsers |
 | `WEB_PORT`        | Empty (off)                                    | Port of the optional [standalone page](#standalone-page-without-home-assistant), e.g. `8080` |
 | `THEAUDIODB_KEY`  | Empty (off)                                    | TheAudioDB API key. Switches on the cache `/audiodb` of the web page (see [TheAudioDB](#artist-images-and-biography-from-theaudiodb)). Without it the bridge does not offer TheAudioDB data. Needs `WEB_PORT` |
-| `CACHE_DIR`       | `<bridge directory>/cache`                     | directory of the TheAudioDB cache (one small file per artist). Has to be writable for the service user |
+| `CACHE_DIR`       | `<bridge directory>/cache`                     | directory of the TheAudioDB cache (one small file per artist). Has to be writable for the service user. Expired files are deleted automatically, shortly after the start and then once a day |
 | `THEAUDIODB_INTERVAL_MS` | `2100` for the key `123`, otherwise `700` | minimum pause between two requests to theaudiodb.com   |
 | `SIGNAL_PATH_LOG` | `/var/roon/RoonServer/Logs/RoonServer_log.txt` | Path to the Roon Server log used by Signal Path support |
 

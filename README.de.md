@@ -304,7 +304,7 @@ Die Karte kann Bilder und eine Biografie von [TheAudioDB](https://www.theaudiodb
 
 Konfigurierst du `audiodb_url` und `audiodb_key` zusammen, fragt die Karte zuerst die Bridge und nur wenn die nicht erreichbar ist direkt theaudiodb.com. Das funktioniert auch ohne die Roon-Bridge, weil die Karte nur den Künstlernamen des Media-Players braucht.
 
-**Schlüssel und Limits:** TheAudioDB bietet einen kostenlosen Test-Schlüssel (`123`) mit strengen Limits, die sich alle Nutzer teilen. Für den Dauerbetrieb besorge dir einen eigenen Schlüssel bei theaudiodb.com. Jeder Künstler wird nur einmal abgefragt: Der Browser (direkter Modus) oder die Bridge (Cache) merkt sich die Antwort 30 Tage lang, unbekannte Künstler einen Tag. Nach einem Fehler versucht es die Karte nach 10 Minuten erneut.
+**Schlüssel und Limits:** TheAudioDB bietet einen kostenlosen Test-Schlüssel (`123`) mit strengen Limits, die sich alle Nutzer teilen. Für den Dauerbetrieb besorge dir einen eigenen Schlüssel bei theaudiodb.com. Jeder Künstler wird nur einmal abgefragt: Der Browser (direkter Modus) oder die Bridge (Cache) merkt sich die Antwort 30 Tage lang, unbekannte Künstler einen Tag. Nach einem Fehler versucht es die Karte nach 10 Minuten erneut. Die Bridge löscht abgelaufene Cache-Dateien selbst, kurz nach dem Start und danach einmal täglich.
 
 **Datenschutz:** Die Namen der Künstler des aktuellen Titels (bis zu drei) werden an theaudiodb.com gesendet, vom Browser des Displays (direkter Modus) oder von der Bridge (Cache). Im direkten Modus ist der Schlüssel Teil der Dashboard-Konfiguration und für alle sichtbar, die sie lesen können. Beim Bridge-Cache bleibt der Schlüssel auf dem Server.
 
@@ -461,6 +461,7 @@ Was die Zeilen bedeuten:
 | `Configuration loaded from ...`               | welche env-Datei verwendet wird. Es wird nur die erste gefundene Datei gelesen, siehe [Konfiguration](#konfiguration) |
 | `TheAudioDB cache on /audiodb: dir ... writable` | der Cache ist aktiv. `NOT writable` (mit `[!]` markiert) bedeutet, dass das Verzeichnis nicht beschreibbar ist: Der Cache lebt dann nur im Speicher bis zum nächsten Neustart |
 | `TheAudioDB cache off`                        | `THEAUDIODB_KEY` ist nicht gesetzt, die Bridge bietet keine TheAudioDB-Daten an          |
+| `TheAudioDB cache cleanup: 2 of 40 files removed ...` | die tägliche Bereinigung: wie viele Cache-Dateien abgelaufen oder beschädigt waren und gelöscht wurden. Sie erscheint erstmals wenige Sekunden nach dem Start |
 | `No connection to the Roon Core ...`          | der Core ist nicht erreichbar. Die Bridge läuft weiter und versucht es alle `ROON_RETRY_MS` erneut |
 
 Das Cache-Verzeichnis muss für den Benutzer beschreibbar sein, unter dem der Dienst läuft. Verwendet der Dienst die systemd-Absicherung (`ProtectSystem=`), muss das Verzeichnis zusätzlich in `ReadWritePaths=` in der Service-Datei stehen.
@@ -490,7 +491,7 @@ Es wird nur die erste vorhandene Datei gelesen, die anderen werden ignoriert. Va
 | `IMAGE_URL_BASE`  | leer                                           | optionale Basis-URL der Roon-Bild-API, wie sie die Browser erreichen |
 | `WEB_PORT`        | leer (aus)                                     | Port der optionalen [eigenständigen Seite](#eigenständige-seite-ohne-home-assistant), z. B. `8080` |
 | `THEAUDIODB_KEY`  | leer (aus)                                     | API-Schlüssel von TheAudioDB. Schaltet den Cache `/audiodb` der Webseite ein (siehe [TheAudioDB](#künstlerbilder-und-biografie-von-theaudiodb)). Ohne ihn bietet die Bridge keine TheAudioDB-Daten an. Braucht `WEB_PORT` |
-| `CACHE_DIR`       | `<Bridge-Verzeichnis>/cache`                   | Verzeichnis des TheAudioDB-Caches (eine kleine Datei pro Künstler). Muss für den Dienst-Benutzer beschreibbar sein |
+| `CACHE_DIR`       | `<Bridge-Verzeichnis>/cache`                   | Verzeichnis des TheAudioDB-Caches (eine kleine Datei pro Künstler). Muss für den Dienst-Benutzer beschreibbar sein. Abgelaufene Dateien werden automatisch gelöscht, kurz nach dem Start und danach einmal täglich |
 | `THEAUDIODB_INTERVAL_MS` | `2100` beim Schlüssel `123`, sonst `700` | minimale Pause zwischen zwei Anfragen an theaudiodb.com       |
 | `SIGNAL_PATH_LOG` | `/var/roon/RoonServer/Logs/RoonServer_log.txt` | Pfad zum Roon-Server-Log für die Signalpfad-Unterstützung     |
 
