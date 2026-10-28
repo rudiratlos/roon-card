@@ -6,7 +6,7 @@
 
 Eine Home-Assistant-Dashboard-Karte und eine kleine Bridge, die eine Roon-ähnliche "Now Playing"-Ansicht auf einfachen Displays ermöglichen.
 
-- **roon-card** ist eine eigene Lovelace-Karte. Sie zeigt Albumcover, wechselnde Künstlerbilder, Titel, Künstler und Album und bietet Transportsteuerung, Lautstärke, Spulen und synchronisierte Songtexte.
+- **roon-card** ist eine eigene Lovelace-Karte. Sie zeigt Albumcover, wechselnde Künstlerbilder, Titel, Künstler und Album und bietet Transportsteuerung, Lautstärke, Spulen und synchronisierte Songtexte. Optional ergänzt sie weitere Künstlerbilder und eine Biografie von [TheAudioDB](https://www.theaudiodb.com).
 - **roon-bridge** ist ein kleiner Node.js-Dienst. Er liest den Wiedergabestatus deiner Roon-Zonen vom Roon Core und veröffentlicht ihn auf deinem MQTT-Broker.
 
 Die Bridge kann die Karte ausserdem als eigenständige Webseite ausliefern, sodass sie auch ohne Home Assistant läuft (siehe [Eigenständige Seite](#eigenständige-seite-ohne-home-assistant)).
@@ -22,10 +22,10 @@ Rechts ist das originale Roon Display, links roon-card. Ein Tipp auf das Cover o
   <img src="https://github.com/rudiratlos/roon-card/blob/main/img/walldisplay_2.jpg" alt="Wall display 2" width="45%">
 </p>
 
-**Fallback-Modus:** Liefert die Roon-Bridge keine Bildinformationen (z. B. weil sie gestoppt ist), arbeitet die Karte weiter mit den Daten der normalen `media_player`-Entität. Sie zeigt dann das vom Player gelieferte Cover, und die Statusanzeige zeigt `Fallback`.
+**Fallback-Modus:** Liefert die Roon-Bridge keine Bildinformationen (z. B. weil sie gestoppt ist), arbeitet die Karte weiter mit den Daten der normalen `media_player`-Entität. Sie zeigt dann das vom Player gelieferte Cover, und die Statusanzeige zeigt `Fallback`. Künstlerbilder und Biografie von TheAudioDB funktionieren auch in diesem Modus, weil die Karte dafür nur den Künstlernamen des Players braucht.
 
 > [!IMPORTANT]
-> **HACS installiert nur die Karte, nicht die Bridge.** Die Bridge ist ein separater Dienst, der auf dem Roon-Server läuft (siehe [roon-bridge](#roon-bridge)). Ohne Bridge funktioniert die Karte nur im Fallback-Modus: keine Künstlerbilder, keine synchronisierten Titeldaten.
+> **HACS installiert nur die Karte, nicht die Bridge.** Die Bridge ist ein separater Dienst, der auf dem Roon-Server läuft (siehe [roon-bridge](#roon-bridge)). Ohne Bridge funktioniert die Karte nur im Fallback-Modus: keine Roon-Künstlerbilder, keine synchronisierten Titeldaten.
 >
 > **Bezeichnung:** Das Repository heisst `roon-card`, der Kartentyp im Dashboard lautet aber `custom:roon-player-card`.
 
@@ -35,6 +35,7 @@ Rechts ist das originale Roon Display, links roon-card. Ein Tipp auf das Cover o
 - [Voraussetzungen](#voraussetzungen)
 - [Installation von roon-card](#installation-von-roon-card)
 - [Verwendung](#verwendung)
+  - [Künstlerbilder und Biografie von TheAudioDB](#künstlerbilder-und-biografie-von-theaudiodb)
 - [roon-bridge](#roon-bridge)
   - [Eigenständige Seite ohne Home Assistant](#eigenständige-seite-ohne-home-assistant)
 - [Fehlerbehebung](#fehlerbehebung)
@@ -74,6 +75,7 @@ Die Einrichtung besteht aus fünf Schritten. Details stehen in den Abschnitten w
 - Roon Core
 - Eine `media_player`-Entität, die deinen Streamer steuert (alle Transport-Tasten rufen Dienste dieser Entität auf)
 - Für die Bridge: ein Debian/Ubuntu-Host (oder ähnlich) mit Node.js 18 oder neuer (Version angenommen, nicht geprüft)
+- Optional: ein API-Schlüssel von [TheAudioDB](https://www.theaudiodb.com) für weitere Künstlerbilder und die Biografie
 
 Die Karte hat keine Abhängigkeiten zu anderen Karten (kein button-card, kein card_mod).
 
@@ -173,15 +175,19 @@ bg_aspects_other:
   - 16by12
   - 16by7
 bg_interval: 15
+bg_interval_min: 10
+bg_cycle: 90
 zoom_seconds: 30
 cover_fit: contain
 lyrics_offset: 0.2
 max_height: 85vh
 format_attr: []
+audiodb_key: "<dein TheAudioDB-Schlüssel>"
+bio_lang: DE,EN
 options: [ nosongtext ]
 ```
 
-Ersetze `player`, `sensor` und `roon_url` durch die Werte deiner Installation.
+Ersetze `player`, `sensor`, `roon_url` und `audiodb_key` durch die Werte deiner Installation. `audiodb_key` ist optional: Ohne ihn stellt die Karte keine Anfragen an TheAudioDB.
 
 ## Bild anzeigen, wenn nichts läuft
 
@@ -221,26 +227,32 @@ cards:
 
 ## Konfigurationsoptionen
 
-| Name               | Typ     | Standard            | Beschreibung                                                                                                                                  |
-|--------------------|---------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `type`             | String  |                     | muss `custom:roon-player-card` sein                                                                                                           |
-| `player`           | String  |                     | **erforderlich.** media_player-Entität deines Streamers                                                                                       |
-| `sensor`           | String  |                     | MQTT-Sensor, der die Bridge-Daten empfängt (siehe unten). Ohne ihn läuft die Karte nur im Player-Modus                                        |
-| `status_sensor`    | String  |                     | MQTT-Sensor mit dem Status der Bridge (siehe unten)                                                                                           |
-| `roon_url`         | String  |                     | Basis-URL der Roon-Bild-API, endet auf `/api/image/`. Ohne sie werden keine Künstlerbilder gezeigt und das Cover kommt vom Player             |
-| `bg_aspects_main`  | Liste   | `['12by10','4by3']` | Bildformate, die für den ersten Künstler gezeigt werden                                                                                       |
-| `bg_aspects_other` | Liste   | `['12by10']`        | Bildformate für weitere Künstler                                                                                                              |
-| `bg_interval`      | Zahl    | `15`                | Sekunden pro Bild                                                                                                                             |
-| `zoom_seconds`     | Zahl    | `30`                | das vergrösserte Cover blendet sich nach dieser Zeit oder bei einem neuen Titel aus                                                           |
-| `cover_fit`        | String  | `contain`           | `contain` zeigt das ganze Cover, `cover` füllt die Fläche                                                                                     |
-| `lyrics_dim`       | Zahl    | `0.55`              | wie stark das Bild hinter den Songtexten abgedunkelt wird (0 bis 1)                                                                           |
-| `lyrics_offset`    | Zahl    | `0.2`               | Sekunden, positiv zeigt die Texte früher, negativ später                                                                                      |
-| `format_attr`      | Liste   | `[]`                | Attributnamen, die als Audioformat angezeigt werden, z. B. `[sample_rate, bit_depth]`                                                         |
-| `clock_url`        | String  | `/`                 | URL, mit der die Uhr des Displays mit Home Assistant verglichen wird (nur der `Date`-Header wird gelesen)                                     |
-| `max_height`       | String  | `85vh`              | maximale Höhe der Karte, beliebige CSS-Länge. Die Karte ist nie höher als breit                                                               |
-| `bar_h`            | Zahl    | `112`               | Höhe der unteren Leiste in px                                                                                                                 |
-| `pad`              | Zahl    | `20`                | horizontaler Abstand der unteren Leiste in px                                                                                                 |
-| `options`          | Liste   | `[]`                | Schalter, siehe unten                                                                                                                         |
+| Name               | Typ            | Standard            | Beschreibung                                                                                                                                  |
+|--------------------|----------------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `type`             | String         |                     | muss `custom:roon-player-card` sein                                                                                                           |
+| `player`           | String         |                     | **erforderlich.** media_player-Entität deines Streamers                                                                                       |
+| `sensor`           | String         |                     | MQTT-Sensor, der die Bridge-Daten empfängt (siehe unten). Ohne ihn läuft die Karte nur im Player-Modus                                        |
+| `status_sensor`    | String         |                     | MQTT-Sensor mit dem Status der Bridge (siehe unten)                                                                                           |
+| `roon_url`         | String         |                     | Basis-URL der Roon-Bild-API, endet auf `/api/image/`. Ohne sie werden keine Roon-Künstlerbilder gezeigt und das Cover kommt vom Player        |
+| `bg_aspects_main`  | Liste          | `['12by10','4by3']` | Bildformate, die für den ersten Künstler gezeigt werden                                                                                       |
+| `bg_aspects_other` | Liste          | `['12by10']`        | Bildformate für weitere Künstler                                                                                                              |
+| `bg_interval`      | Zahl           | `15`                | längste Zeit pro Bild in Sekunden                                                                                                             |
+| `bg_interval_min`  | Zahl           | `10`                | kürzeste Zeit pro Bild in Sekunden, wird bei vielen Bildern verwendet                                                                         |
+| `bg_cycle`         | Zahl           | `90`                | Zielzeit in Sekunden für einen Durchlauf durch alle Bilder. Die Zeit pro Bild ist `bg_cycle` geteilt durch die Anzahl der Bilder, aber nie unter `bg_interval_min` und nie über `bg_interval`. `0` = immer `bg_interval` |
+| `zoom_seconds`     | Zahl           | `30`                | das vergrösserte Cover blendet sich nach dieser Zeit oder bei einem neuen Titel aus                                                           |
+| `cover_fit`        | String         | `contain`           | `contain` zeigt das ganze Cover, `cover` füllt die Fläche                                                                                     |
+| `lyrics_dim`       | Zahl           | `0.55`              | wie stark das Bild hinter den Songtexten abgedunkelt wird (0 bis 1)                                                                           |
+| `lyrics_offset`    | Zahl           | `0.2`               | Sekunden, positiv zeigt die Texte früher, negativ später                                                                                      |
+| `format_attr`      | Liste          | `[]`                | Attributnamen, die als Audioformat angezeigt werden, z. B. `[sample_rate, bit_depth]`                                                         |
+| `audiodb_key`      | String         |                     | API-Schlüssel von TheAudioDB. Ohne Schlüssel (und ohne `audiodb_url`) stellt die Karte keine Anfragen an TheAudioDB. Siehe [TheAudioDB](#künstlerbilder-und-biografie-von-theaudiodb) |
+| `audiodb_url`      | String         |                     | Cache des Bridge-Webservers, z. B. `http://<roon-server-ip>:8080/audiodb`. Er wird zuerst gefragt, die Karte braucht dafür keinen Schlüssel. Die [eigenständige Seite](#eigenständige-seite-ohne-home-assistant) setzt ihn selbst |
+| `audiodb_images`   | String         | `extra`             | `extra` zeigt die TheAudioDB-Bilder nach den Roon-Bildern, `fallback` nur wenn Roon keine hat, `off` zeigt keine (die Biografie bleibt verfügbar) |
+| `bio_lang`         | String/Liste   | `EN`                | Sprachreihenfolge der Biografie, z. B. `DE,EN` oder `[DE, EN]`                                                                                |
+| `clock_url`        | String         | `/`                 | URL, mit der die Uhr des Displays mit Home Assistant verglichen wird (nur der `Date`-Header wird gelesen)                                     |
+| `max_height`       | String         | `85vh`              | maximale Höhe der Karte, beliebige CSS-Länge. Die Karte ist nie höher als breit                                                               |
+| `bar_h`            | Zahl           | `112`               | Höhe der unteren Leiste in px                                                                                                                 |
+| `pad`              | Zahl           | `20`                | horizontaler Abstand der unteren Leiste in px                                                                                                 |
+| `options`          | Liste          | `[]`                | Schalter, siehe unten                                                                                                                         |
 
 Die Bildformate werden als `?aspect=...` an die Roon-Bild-API übergeben. Getestet sind die Formate `12by10`, `4by3`, `16by12` und `16by7`.
 
@@ -248,14 +260,53 @@ Die Bildformate werden als `?aspect=...` an die Roon-Bild-API übergeben. Getest
 
 | Name          | Beschreibung                                                                                                |
 |---------------|-------------------------------------------------------------------------------------------------------------|
+| `nobuttons`   | keine Player-Bedienung (Lautstärke, Zurück, Play/Pause, Weiter) und kein Spulen per Tipp auf den Fortschrittsbalken. Für Displays ohne Touch. Die untere Leiste wird kleiner, das Bild dadurch grösser |
+| `nobio`       | ein Tipp auf einen Künstlernamen öffnet die Biografie nicht                                                 |
 | `nosongtext`  | Songtexte nicht anzeigen                                                                                    |
-| `nostatus`    | Statusanzeige nicht anzeigen (Künstlernummer, Format, Fallback, Audioformat)                                |
-| `noaspect`    | Seitenverhältnis in der Statusanzeige nicht anzeigen                                                        |
-| `nosource`    | die Bildquelle (`Cover` / `Artist n/m`) in der Statusanzeige nicht anzeigen                                 |
+| `nostatus`    | Statusanzeige nicht anzeigen (Bildquelle, Format, Fallback, Audioformat)                                    |
+| `noaspect`    | Seitenverhältnis (Roon-Bilder) oder Bildtyp (`thumb`, `fanart`; TheAudioDB-Bilder) in der Statusanzeige nicht anzeigen |
+| `nosource`    | die Wörter `Artist` und `Cover` in der Statusanzeige nicht anzeigen. Die Quelle und die Künstlernummer bleiben: `roon`, `tadb 2/2` statt `roon Cover`, `tadb Artist 2/2` |
 | `noformat`    | Audioformat in der Statusanzeige nicht anzeigen                                                             |
 | `nounderline` | den Namen des Künstlers, dessen Bild gerade läuft, nicht unterstreichen (nur bei Titeln mit mehreren Künstlern) |
 | `noscroll`    | lange Titel, Künstler oder Alben nicht scrollen, stattdessen "..." anzeigen                                 |
 | `nostale`     | Prüfung deaktivieren, ob die Bridge-Daten zum aktuellen Titel passen                                        |
+| `debug`       | ein Tipp auf die Statusanzeige öffnet ein Diagnose-Panel (Bridge-Status, Bildquellen, TheAudioDB-Status, Intervall, aktuelle Bild-URL) |
+
+### Statusanzeige
+
+Die kleine Anzeige unten rechts im Bild zeigt, woher das aktuelle Bild kommt, zum Beispiel:
+
+| Anzeige                      | Bedeutung                                                                     |
+|------------------------------|-------------------------------------------------------------------------------|
+| `roon Cover`                 | das Albumcover                                                                |
+| `roon Artist 1/2 · 12by10`   | Künstlerbild von Roon, erster von zwei Künstlern, Bildformat `12by10`         |
+| `tadb Artist 2/2 · fanart`   | Künstlerbild von TheAudioDB (`tadb`), zweiter von zwei Künstlern, Typ `fanart` |
+
+`roon` bedeutet, dass das Bild von Roon kommt (Bild-API des Core, im Fallback-Modus das Cover des Media-Players), `tadb` bedeutet, dass es von TheAudioDB kommt. Mit dem Schalter `nosource` entfallen die Wörter `Artist` und `Cover`, die Anzeige lautet dann `roon`, `roon 1/2 · 12by10` oder `tadb 2/2 · fanart`.
+
+### Künstlerbilder und Biografie von TheAudioDB
+
+Die Karte kann Bilder und eine Biografie von [TheAudioDB](https://www.theaudiodb.com) ergänzen, einer Community-Datenbank für Musik-Artwork. Sie ist aus, solange weder `audiodb_key` noch `audiodb_url` gesetzt ist.
+
+**Bilder:** Für jeden Künstler (bis zu drei) zeigt die Karte das Thumb und bis zu vier Fanart-Bilder (`strArtistThumb`, `strArtistFanart`, `strArtistFanart2` bis `strArtistFanart4`). Mit `audiodb_images: extra` (Standard) folgen sie auf die Roon-Bilder, du bekommst also mehr Abwechslung. Bei mehr Bildern wird die Zeit pro Bild kürzer (siehe `bg_interval_min` und `bg_cycle`).
+
+**Biografie:** Tippe in der unteren Leiste auf den Namen eines Künstlers. Es öffnet sich ein Panel mit Land, Genre, Jahr und dem Text. Ein Tipp auf das Panel schliesst es. `bio_lang` legt die Sprachreihenfolge fest. `bio_lang: DE,EN` bedeutet: zuerst der deutsche Text (`strBiographyDE`), falls keiner da ist der englische (`strBiography`). Andere Sprachen verwenden die Codes von TheAudioDB (z. B. `FR`, `ES`, `IT`, `NL`); `JA`, `ZH`, `SV`, `HE` und `NB` werden auf `JP`, `CN`, `SE`, `IL` und `NO` abgebildet. Die Fusszeile des Panels zeigt die verwendete Sprache. Auf einem Display ohne Touch lässt sich die Biografie nicht öffnen.
+
+**Zuordnung:** Der Künstlername muss mit dem Eintrag bei TheAudioDB übereinstimmen (Gross-/Kleinschreibung, Akzente und Satzzeichen werden ignoriert). Stimmt er nicht, gibt es für diesen Künstler weder Bilder noch Biografie, was besser ist als eine falsche.
+
+**Drei Möglichkeiten:**
+
+| Aufbau                                | Konfiguration                                                           | Woher die Anfragen kommen                                        |
+|---------------------------------------|-------------------------------------------------------------------------|------------------------------------------------------------------|
+| Home Assistant, direkt                | `audiodb_key` in der Karte                                              | der Browser jedes Displays fragt theaudiodb.com                  |
+| Home Assistant, mit Bridge-Cache      | `audiodb_url: http://<roon-server-ip>:8080/audiodb` und `THEAUDIODB_KEY` in der env-Datei der Bridge | der Browser fragt die Bridge, die Bridge fragt theaudiodb.com und speichert die Antworten |
+| Eigenständige Seite                   | `THEAUDIODB_KEY` in der env-Datei der Bridge (die Seite setzt die URL selbst) | wie in der Zeile darüber                                         |
+
+Konfigurierst du `audiodb_url` und `audiodb_key` zusammen, fragt die Karte zuerst die Bridge und nur wenn die nicht erreichbar ist direkt theaudiodb.com. Das funktioniert auch ohne die Roon-Bridge, weil die Karte nur den Künstlernamen des Media-Players braucht.
+
+**Schlüssel und Limits:** TheAudioDB bietet einen kostenlosen Test-Schlüssel (`123`) mit strengen Limits, die sich alle Nutzer teilen. Für den Dauerbetrieb besorge dir einen eigenen Schlüssel bei theaudiodb.com. Jeder Künstler wird nur einmal abgefragt: Der Browser (direkter Modus) oder die Bridge (Cache) merkt sich die Antwort 30 Tage lang, unbekannte Künstler einen Tag. Nach einem Fehler versucht es die Karte nach 10 Minuten erneut.
+
+**Datenschutz:** Die Namen der Künstler des aktuellen Titels (bis zu drei) werden an theaudiodb.com gesendet, vom Browser des Displays (direkter Modus) oder von der Bridge (Cache). Im direkten Modus ist der Schlüssel Teil der Dashboard-Konfiguration und für alle sichtbar, die sie lesen können. Beim Bridge-Cache bleibt der Schlüssel auf dem Server.
 
 ### Audioformat (Bittiefe, Abtastrate)
 
@@ -267,7 +318,7 @@ Die Songtexte stammen von [LRCLIB](https://lrclib.net). Die Karte sendet den ers
 
 ### Hinweis zu HTTPS
 
-Die Roon-Bild-API liefert nur unverschlüsseltes HTTP. Öffnest du Home Assistant über HTTPS, blockieren Browser diese Bilder (Mixed Content). Leite die Bilder dann über einen HTTPS-Reverse-Proxy und verwende dessen URL als `roon_url`.
+Die Roon-Bild-API liefert nur unverschlüsseltes HTTP. Öffnest du Home Assistant über HTTPS, blockieren Browser diese Bilder (Mixed Content). Leite die Bilder dann über einen HTTPS-Reverse-Proxy und verwende dessen URL als `roon_url`. Dasselbe gilt für `audiodb_url`: Eine HTTP-Adresse der Bridge wird auf einer HTTPS-Seite blockiert. Die Karte fragt dann direkt theaudiodb.com, wenn `audiodb_key` gesetzt ist.
 
 ---
 
@@ -286,6 +337,8 @@ Für jede Zone veröffentlicht die Bridge eine Retained-JSON-Nachricht mit:
 - Optionale Signalpfad-Informationen zum aktuell gespielten Titel
 
 Zusätzlich veröffentlicht die Bridge ihren Betriebsstatus, einschliesslich Bridge-Version und Roon-Core-Informationen, in einem eigenen MQTT-Status-Topic.
+
+Die Bridge läuft weiter, wenn der Roon Core nicht erreichbar ist, zum Beispiel während er neu startet. Sie meldet den Status `roon_disconnected`, hält ihre Webseite und den TheAudioDB-Cache verfügbar und verbindet sich von selbst wieder.
 
 ## Signalpfad-Unterstützung
 
@@ -378,6 +431,40 @@ sudo npm install
 sudo systemctl restart roon-mqtt
 ```
 
+### Startlog
+
+`journalctl -f` zeigt beim Start nur die letzten 10 Zeilen. Um den Start der Bridge zu sehen, verwende:
+
+```
+sudo journalctl -u roon-mqtt.service -n 60 --no-pager
+```
+
+Ein gesunder Start sieht so aus:
+
+```
+[*] roon-bridge v2.1.0 (Node v22.11.0)
+[*] Configuration loaded from /etc/roon-mqtt.env (log level: info)
+[+] TheAudioDB cache on /audiodb: dir /var/lib/roon-card/cache writable, own key, min. 700 ms between requests
+[*] Connecting to MQTT broker mqtt://homeassistant.local...
+[*] Connecting to the Roon Core at 127.0.0.1:9330...
+[+] Web page on http://<this-host>:8080/
+[+] MQTT connected.
+[+] Paired with Roon.
+[*] Status: online
+```
+
+Was die Zeilen bedeuten:
+
+| Zeile                                         | Bedeutung                                                                                |
+|-----------------------------------------------|------------------------------------------------------------------------------------------|
+| `roon-bridge v...`                            | Version der Bridge (aus `package.json`) und von Node.js                                  |
+| `Configuration loaded from ...`               | welche env-Datei verwendet wird. Es wird nur die erste gefundene Datei gelesen, siehe [Konfiguration](#konfiguration) |
+| `TheAudioDB cache on /audiodb: dir ... writable` | der Cache ist aktiv. `NOT writable` (mit `[!]` markiert) bedeutet, dass das Verzeichnis nicht beschreibbar ist: Der Cache lebt dann nur im Speicher bis zum nächsten Neustart |
+| `TheAudioDB cache off`                        | `THEAUDIODB_KEY` ist nicht gesetzt, die Bridge bietet keine TheAudioDB-Daten an          |
+| `No connection to the Roon Core ...`          | der Core ist nicht erreichbar. Die Bridge läuft weiter und versucht es alle `ROON_RETRY_MS` erneut |
+
+Das Cache-Verzeichnis muss für den Benutzer beschreibbar sein, unter dem der Dienst läuft. Verwendet der Dienst die systemd-Absicherung (`ProtectSystem=`), muss das Verzeichnis zusätzlich in `ReadWritePaths=` in der Service-Datei stehen.
+
 ## Konfiguration
 
 Die Bridge lädt Umgebungsvariablen aus der ersten lesbaren Datei in dieser Reihenfolge:
@@ -386,7 +473,7 @@ Die Bridge lädt Umgebungsvariablen aus der ersten lesbaren Datei in dieser Reih
 2. `.env` im Bridge-Verzeichnis
 3. `/etc/roon-mqtt.env`
 
-Variablen, die bereits in der Prozessumgebung gesetzt sind, haben Vorrang vor den Werten in diesen Dateien.
+Es wird nur die erste vorhandene Datei gelesen, die anderen werden ignoriert. Variablen, die bereits in der Prozessumgebung gesetzt sind, haben Vorrang vor den Werten in diesen Dateien.
 
 | Variable          | Standard                                       | Beschreibung                                                  |
 |-------------------|------------------------------------------------|---------------------------------------------------------------|
@@ -396,11 +483,15 @@ Variablen, die bereits in der Prozessumgebung gesetzt sind, haben Vorrang vor de
 | `MQTT_TOPIC`      | `roon/now_playing`                             | Basis-Topic für Zonen- und Statusnachrichten                  |
 | `ROON_HOST`       | `127.0.0.1`                                    | Hostname oder IP-Adresse des Roon Core                        |
 | `ROON_PORT`       | `9330`                                         | WebSocket-Port des Roon Core                                  |
-| `PAIR_HINT_MS`    | `15000`                                        | Zeit ohne Kopplung, nach der der Status auf `pairing_required` wechselt. Die Bridge wartet weiter |
+| `PAIR_HINT_MS`    | `15000`                                        | Zeit ohne Verbindung, nach der der Status auf `pairing_required` (Core erreichbar, Erweiterung nicht aktiviert) oder `roon_disconnected` (Core nicht erreichbar) wechselt. Die Bridge wartet weiter |
+| `ROON_RETRY_MS`   | `10000`                                        | Pause zwischen den Versuchen, sich mit dem Roon Core zu verbinden. Die Bridge beendet sich nie, nur weil der Core fehlt |
 | `HEARTBEAT_MS`    | `30000`                                        | Intervall zwischen Status-Updates in Millisekunden            |
 | `LOG_LEVEL`       | `info`                                         | `info` blendet die Roon-Protokollmeldungen aus (sie enthalten Tokens, Zonen- und Bild-Schlüssel). `debug` gibt alles aus |
 | `IMAGE_URL_BASE`  | leer                                           | optionale Basis-URL der Roon-Bild-API, wie sie die Browser erreichen |
 | `WEB_PORT`        | leer (aus)                                     | Port der optionalen [eigenständigen Seite](#eigenständige-seite-ohne-home-assistant), z. B. `8080` |
+| `THEAUDIODB_KEY`  | leer (aus)                                     | API-Schlüssel von TheAudioDB. Schaltet den Cache `/audiodb` der Webseite ein (siehe [TheAudioDB](#künstlerbilder-und-biografie-von-theaudiodb)). Ohne ihn bietet die Bridge keine TheAudioDB-Daten an. Braucht `WEB_PORT` |
+| `CACHE_DIR`       | `<Bridge-Verzeichnis>/cache`                   | Verzeichnis des TheAudioDB-Caches (eine kleine Datei pro Künstler). Muss für den Dienst-Benutzer beschreibbar sein |
+| `THEAUDIODB_INTERVAL_MS` | `2100` beim Schlüssel `123`, sonst `700` | minimale Pause zwischen zwei Anfragen an theaudiodb.com       |
 | `SIGNAL_PATH_LOG` | `/var/roon/RoonServer/Logs/RoonServer_log.txt` | Pfad zum Roon-Server-Log für die Signalpfad-Unterstützung     |
 
 **Hinweis:** `SIGNAL_PATH_LOG` wird beim Laden von `signal-path.js` gelesen. In der aktuellen Implementierung geschieht das, bevor die Bridge ihre `.env`-Datei lädt. Um den Pfad zuverlässig zu ändern, setze `SIGNAL_PATH_LOG` in der Prozessumgebung, bevor Node.js gestartet wird. Der Standardpfad funktioniert ohne zusätzliche Konfiguration, wenn das Log dort liegt.
@@ -416,10 +507,15 @@ MQTT_PASSWORD=
 ROON_HOST=127.0.0.1
 ROON_PORT=9330
 PAIR_HINT_MS=15000
+ROON_RETRY_MS=10000
 HEARTBEAT_MS=30000
 LOG_LEVEL=info
 IMAGE_URL_BASE=http://192.168.1.20:9330/api/image
 WEB_PORT=8080
+
+# optional: Künstlerbilder und Biografie von TheAudioDB
+THEAUDIODB_KEY=
+CACHE_DIR=/var/lib/roon-card/cache
 ```
 
 Setze `IMAGE_URL_BASE` auf die URL, die der Browser deines Home-Assistant-Displays erreichen kann. Ist sie nicht gesetzt, müssen die Verbraucher ihre eigene Bild-URL konfigurieren.
@@ -434,7 +530,7 @@ Die Seite bekommt ihre Daten direkt von der Bridge. Der Browser braucht keinen M
 
 | Datei                     | Zweck                                                                                |
 |---------------------------|--------------------------------------------------------------------------------------|
-| `bridge/web.js`           | kleiner Webserver (Seite, Live-Daten, Transportsteuerung)                            |
+| `bridge/web.js`           | kleiner Webserver (Seite, Live-Daten, Transportsteuerung, TheAudioDB-Cache)          |
 | `bridge/web/index.html`   | Seite, die die Karte einbettet                                                       |
 | `roon-card.js`            | die Karte selbst, wird in `bridge/web/`, `bridge/` oder im Hauptordner des Repositorys gefunden |
 
@@ -455,18 +551,30 @@ http://<roon-server-ip>:8080/?zone=Wohnzimmer&options=nosource
 
 **URL-Parameter:**
 
-| Parameter | Beschreibung                                                                                                                                              |
-|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `zone`    | Name der Roon-Zone, wie in Roon angezeigt (Gross-/Kleinschreibung egal). Ohne Angabe wird die erste Zone verwendet. Wird die Zone nicht gefunden, listet die Seite die vorhandenen Zonen auf |
-| `options` | Schalter der Karte, durch Kommas getrennt, z. B. `nosource,noaspect,nostatus` (siehe [Schalter](#schalter-options))                                       |
-| `img`     | Basis-URL der Roon-Bild-API. Nur nötig, wenn `IMAGE_URL_BASE` nicht gesetzt ist. Standard: `http://<Host der Seite>:9330/api/image`                       |
+| Parameter  | Beschreibung                                                                                                                                              |
+|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `zone`     | Name der Roon-Zone, wie in Roon angezeigt (Gross-/Kleinschreibung egal). Ohne Angabe wird die erste Zone verwendet. Wird die Zone nicht gefunden, listet die Seite die vorhandenen Zonen auf |
+| `options`  | Schalter der Karte, durch Kommas getrennt, z. B. `nobuttons,nosource,nostatus` (siehe [Schalter](#schalter-options))                                      |
+| `bio_lang` | Sprachreihenfolge der Biografie, z. B. `DE,EN` (siehe [TheAudioDB](#künstlerbilder-und-biografie-von-theaudiodb))                                         |
+| `audiodb`  | `0` = den TheAudioDB-Cache dieses Servers nicht verwenden                                                                                                 |
+| `img`      | Basis-URL der Roon-Bild-API. Nur nötig, wenn `IMAGE_URL_BASE` nicht gesetzt ist. Standard: `http://<Host der Seite>:9330/api/image`                       |
 
-**Kiosk auf einem Raspberry Pi:** Chromium im Kiosk-Modus mit dieser URL starten, zum Beispiel mit `cage -- chromium --kiosk --ozone-platform=wayland "<URL>"`.
+Für ein Display ohne Touch zum Beispiel: `http://<roon-server-ip>:8080/?zone=Wohnzimmer&options=nobuttons,nosource&bio_lang=DE,EN`.
+
+**TheAudioDB auf der Seite:** Mit `THEAUDIODB_KEY` in der env-Datei zeigt die Seite TheAudioDB-Bilder nach den Roon-Bildern, und ein Tipp auf den Künstlernamen öffnet die Biografie. Die Bridge fragt theaudiodb.com und speichert jede Antwort in `CACHE_DIR`. Jeder Künstler wird also nur einmal abgefragt, egal wie viele Displays die Seite verwenden. Der Cache antwortet auch, wenn der Roon Core nicht läuft. Du kannst ihn direkt testen:
+
+```
+curl 'http://<roon-server-ip>:8080/audiodb?artist=Genesis'
+```
+
+Die Antwort ist JSON mit `strArtistThumb`, `strBiography...` und weiteren Feldern. `HTTP 503` bedeutet, dass `THEAUDIODB_KEY` nicht gesetzt ist, `HTTP 502`, dass theaudiodb.com nicht geantwortet hat (die nächste Anfrage versucht es erneut).
 
 Screenshots (webserver_X.jpg) sind im ./img directory.
 
+**Kiosk auf einem Raspberry Pi:** Chromium im Kiosk-Modus mit dieser URL starten, zum Beispiel mit `cage -- chromium --kiosk --ozone-platform=wayland "<URL>"`.
+
 > [!WARNING]
-> Die Seite hat keinen Passwortschutz. Jeder im Netzwerk kann Wiedergabe und Lautstärke steuern. Den Port nicht ins Internet freigeben.
+> Die Seite hat keinen Passwortschutz. Jeder im Netzwerk kann Wiedergabe und Lautstärke steuern und den TheAudioDB-Cache nutzen (der deinen Schlüssel verwendet). Den Port nicht ins Internet freigeben.
 
 ## MQTT-Topics
 
@@ -484,9 +592,9 @@ Die Status-Nachricht enthält einen Statuswert und einen Zeitstempel. Falls verf
 | Status              | Bedeutung                                                         |
 |---------------------|-------------------------------------------------------------------|
 | `starting`          | Die Bridge ist gestartet, aber noch nicht mit Roon gekoppelt      |
-| `pairing_required`  | Nach `PAIR_HINT_MS` noch nicht gekoppelt: die Erweiterung in der Roon-App aktivieren (**Einstellungen → Erweiterungen**). Die Bridge läuft weiter und wartet |
+| `pairing_required`  | Nach `PAIR_HINT_MS` noch nicht gekoppelt, obwohl der Core erreichbar ist: die Erweiterung in der Roon-App aktivieren (**Einstellungen → Erweiterungen**). Die Bridge läuft weiter und wartet |
 | `online`            | Die Bridge ist mit Roon gekoppelt und kann Zonendaten senden      |
-| `roon_disconnected` | Die Verbindung zu Roon wurde unterbrochen                         |
+| `roon_disconnected` | Keine Verbindung zum Roon Core (unterbrochen oder nicht erreichbar). Die Bridge läuft weiter und versucht es alle `ROON_RETRY_MS` erneut. Sobald der Core wieder da ist, wechselt der Status von selbst auf `online` |
 | `error`             | Ein unerwarteter Fehler ist aufgetreten                           |
 | `offline`           | Die Bridge wurde gestoppt oder unerwartet getrennt                |
 
@@ -586,11 +694,16 @@ Nach dem Neuladen der MQTT-Konfiguration unter **Entwicklerwerkzeuge → Zustän
 | Karte zeigt `Fallback`                           | der Sensor passt nicht zum aktuellen Titel. Prüfen, ob die Bridge läuft und das Sensor-Topic stimmt. `nostale` verwenden, wenn Titel bei Player und Roon unterschiedlich geschrieben sind     |
 | Karte zeigt gar keine Daten                      | die Bridge ist nicht installiert oder läuft nicht. HACS installiert nur die Karte, nicht die Bridge                                                                                          |
 | Keine Künstlerbilder                             | `roon_url` fehlt oder ist falsch, der Browser erreicht den Roon-Server nicht, oder Home Assistant läuft über HTTPS (siehe Hinweis zu HTTPS)                                                   |
+| Keine TheAudioDB-Bilder (kein `tadb` in der Statusanzeige) | weder `audiodb_key` noch `audiodb_url` ist gesetzt, oder `audiodb_images` steht auf `off`. Mit `options: [debug]` das Diagnose-Panel öffnen und auf die Statusanzeige tippen: Die Zeile `audiodb:` zeigt den Modus und den Zustand pro Künstler (`ok`, `ok (unknown)`, `loading`, `error`, `none`). `unknown` heisst, dass TheAudioDB keinen Künstler mit genau diesem Namen kennt |
+| Biografie öffnet sich nicht                      | bei einem Tipp passiert nichts: `audiodb_key`/`audiodb_url` fehlt, `nobio` ist gesetzt oder das Display hat kein Touch. Auf den **Namen des Künstlers** in der unteren Leiste tippen. "TheAudioDB not reachable": Schlüssel falsch, Limit erreicht (Test-Schlüssel) oder kein Internetzugang. "No biography available": TheAudioDB hat keinen Text in den Sprachen von `bio_lang` |
+| Eigenständige Seite: keine TheAudioDB-Daten      | das Log muss `TheAudioDB cache on /audiodb` zeigen. Steht dort `cache off`, fehlt `THEAUDIODB_KEY` in der env-Datei, die verwendet wird (siehe `Configuration loaded from ...`). Mit `curl 'http://<host>:8080/audiodb?artist=Genesis'` testen (503 = kein Schlüssel, 502 = theaudiodb.com hat nicht geantwortet). Seite nach einem Update von `roon-card.js` oder `index.html` neu laden (hart neu laden) |
+| `TheAudioDB cache: ... NOT writable` im Log      | der Dienst-Benutzer kann nicht in `CACHE_DIR` schreiben. Besitzer des Verzeichnisses prüfen (`ls -ld`) und bei systemd-Absicherung `ReadWritePaths=` in der Service-Datei. Bis dahin arbeitet der Cache im Speicher |
 | Ruhebild ist defekt                              | `/local/icons/roon-logo.png` existiert nicht. Bei HACS muss diese Datei separat heruntergeladen werden                                                                                       |
 | Keine Songtexte                                  | der Titel hat bei LRCLIB keine synchronisierten Texte, der Dienst ist vorübergehend nicht erreichbar (die Karte versucht es nach einer Minute erneut) oder `nosongtext` ist gesetzt           |
 | Songtexte sind nicht synchron                    | `lyrics_offset` anpassen. Eine falsch gehende Uhr am Display kann ebenfalls eine Verschiebung von ein bis zwei Sekunden verursachen                                                           |
-| Eigenständige Seite bleibt leer                  | `WEB_PORT` fehlt oder `web.js` / `web/index.html` liegen nicht im Bridge-Verzeichnis (das Log muss `Web page on ...` zeigen). Die Bridge ist nicht mit Roon gekoppelt (Status `pairing_required`). Der Zonenname bei `?zone=` existiert nicht: die Seite listet dann nach einigen Sekunden die vorhandenen Zonen auf |
+| Eigenständige Seite bleibt leer                  | `WEB_PORT` fehlt oder `web.js` / `web/index.html` liegen nicht im Bridge-Verzeichnis (das Log muss `Web page on ...` zeigen). Die Bridge ist nicht mit Roon gekoppelt (Status `pairing_required`) oder der Core ist nicht erreichbar (Status `roon_disconnected`). Der Zonenname bei `?zone=` existiert nicht: die Seite listet dann nach einigen Sekunden die vorhandenen Zonen auf |
 | Bridge startet nicht                             | `sudo journalctl -u roon-mqtt.service -n 50`. Prüfen, ob die Erweiterung in Roon aktiviert ist und ob die Broker-Einstellungen in `/etc/roon-mqtt.env` stimmen                                |
+| Roon-Protokollzeilen (`<- CONTINUE ...`) im Log  | `LOG_LEVEL` steht auf `debug`, oder es läuft eine alte Version der Bridge. Die ersten Zeilen des Logs prüfen (`roon-bridge v...`). Diese Zeilen enthalten Tokens und Zonen-IDs, nicht weitergeben |
 
 # Lizenz
 

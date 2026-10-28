@@ -36,7 +36,8 @@
     //   nobuttons    no player controls (volume, previous/play/next, seek): for displays without touch
     //   nobio        tapping an artist name does not open the biography
     //   nosongtext   lyrics off
-    //   noaspect     do not show the aspect ratio in the pill
+    //   noaspect     do not show the aspect ratio (roon) or the image type (tadb) in the pill
+    //   nosource     do not show the words Artist and Cover in the pill (the source roon/tadb and the number n/m stay)
     //   nostatus     status pill off
     //   noformat     do not show the audio format
     //   nounderline  do not underline the artist name
@@ -725,7 +726,7 @@
           if (r.state === 'loading') this._adWait(nzu(n), r.p);
           if (wantImg && r.state === 'ok') {
             audiodbImages(r.rec).forEach(function (im) {
-              slides.push({ u: im.u, m: 'fill', kind: 'artist', ai: ai, asp: 'audiodb ' + im.kind, ext: true });
+              slides.push({ u: im.u, m: 'fill', kind: 'artist', ai: ai, asp: im.kind, ext: true });
               extCount++;
             });
           }
@@ -830,11 +831,14 @@
       const p = [];
       if (!o.nostatus) {
         if (s) {
+          // The image source comes first: roon = Roon (image API or media player), tadb = TheAudioDB
+          // nosource only leaves out the words "Artist" and "Cover": the source and the number stay
+          const src = s.ext ? 'tadb' : 'roon';
           if (s.kind === 'artist') {
-            p.push(d.nKeys > 1 ? 'Artist ' + (s.ai + 1) + '/' + d.nKeys : 'Artist');
+            p.push([src, o.nosource ? '' : 'Artist', d.nKeys > 1 ? (s.ai + 1) + '/' + d.nKeys : ''].filter(Boolean).join(' '));
             if (!o.noaspect) p.push(s.asp);
           } else {
-            p.push('Cover');
+            p.push([src, o.nosource ? '' : 'Cover'].filter(Boolean).join(' '));
           }
         }
         if (d.noUrl) p.push('no image url');

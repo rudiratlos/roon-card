@@ -161,6 +161,7 @@ const RoonApi = require('node-roon-api');
 const RoonApiTransport = require('node-roon-api-transport');
 const mqtt = require('mqtt');
 
+logInfo(`[*] roon-bridge v${BRIDGE_VERSION} (Node ${process.version})`);
 logInfo(
   ENV_LOADED_FROM
     ? `[*] Configuration loaded from ${ENV_LOADED_FROM} (log level: ${LOG_LEVEL})`
@@ -292,6 +293,8 @@ const roon = new RoonApi({
   display_version: BRIDGE_VERSION,
   publisher: 'me',
   email: 'me@example.com',
+  // node-roon-api prints every protocol message (tokens, zone IDs, image keys): off unless LOG_LEVEL=debug
+  log_level: LOG_LEVEL === 'debug' ? 'all' : 'none',
 
   core_paired: (core) => {
     paired = true;
@@ -464,31 +467,36 @@ function connectRoon() {
   if (connectFails === 0 || connectFails % 30 === 0) {
     logInfo(`[*] Connecting to the Roon Core at ${ROON_HOST}:${ROON_PORT}...`);
   }
+
+  // Called when the attempt failed or an established connection ended. Both events can fire for one
+  // connection, so it only counts once.
+  let handled = false;
+  const ended = () => {
+    if (handled || shuttingDown) return;
+    handled = true;
+    connectFails++;
+    roonLost();
+    if (connectFails === 1) {
+      logInfo(
+        `[-] No connection to the Roon Core at ${ROON_HOST}:${ROON_PORT}; ` +
+        `retrying every ${Math.round(ROON_RETRY_MS / 1000)} s.`
+      );
+    }
+    // After the start-up grace period an unreachable Core is reported to the consumers
+    if (Date.now() - startedAt >= PAIR_HINT_MS && currentStatus !== 'roon_disconnected') {
+      setStatus('roon_disconnected');
+    }
+    scheduleReconnect();
+  };
+
   try {
-    roon.ws_connect({
-      host: ROON_HOST,
-      port: ROON_PORT,
-      onclose: () => {
-        if (shuttingDown) return;
-        connectFails++;
-        roonLost();
-        if (connectFails === 1) {
-          logInfo(
-            `[-] No connection to the Roon Core at ${ROON_HOST}:${ROON_PORT}; ` +
-            `retrying every ${Math.round(ROON_RETRY_MS / 1000)} s.`
-          );
-        }
-        // After the start-up grace period an unreachable Core is reported to the consumers
-        if (Date.now() - startedAt >= PAIR_HINT_MS && currentStatus !== 'roon_disconnected') {
-          setStatus('roon_disconnected');
-        }
-        scheduleReconnect();
-      }
-    });
+    const moo = roon.ws_connect({ host: ROON_HOST, port: ROON_PORT, onclose: ended });
+    // node-roon-api only calls onclose for connections that were open. A connection that cannot be
+    // established (Core down or unreachable) only triggers transport.onerror, so watch that too.
+    if (moo && moo.transport) moo.transport.onerror = ended;
   } catch (e) {
     logInfo('[-] Roon connect failed: ' + e.message);
-    connectFails++;
-    scheduleReconnect();
+    ended();
   }
 }
 

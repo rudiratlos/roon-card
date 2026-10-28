@@ -94,7 +94,7 @@ function control(q) {
 //                                 503  no THEAUDIODB_KEY configured
 // Cache: memory + one JSON file per artist (CACHE_DIR, default <app dir>/cache).
 
-const AD = { key: '', dir: '', interval: 2100 };
+const AD = { key: '', dir: '', interval: 2100, log: console.log };
 const AD_TTL_FOUND = 30 * 24 * 3600 * 1000;
 const AD_TTL_UNKNOWN = 24 * 3600 * 1000;
 const AD_KEEP = /^(idArtist|strArtist|strArtistAlternate|strMusicBrainzID|strCountry|intBornYear|intFormedYear|strGenre|strArtistThumb|strArtistWideThumb|strArtistFanart\d?|strBiography[A-Z]{0,2})$/;
@@ -151,9 +151,15 @@ function adRead(k) {
   return e.until > Date.now() ? e.body : null;
 }
 
+let adWriteWarned = false;
 function adWrite(k, e) {
   adMem.set(k, e);
-  fs.writeFile(adFile(k), JSON.stringify(e), () => {});   // best effort
+  fs.writeFile(adFile(k), JSON.stringify(e), (err) => {    // best effort, but say so once if it fails
+    if (err && !adWriteWarned) {
+      adWriteWarned = true;
+      AD.log('[!] TheAudioDB cache: cannot write to ' + AD.dir + ' (' + err.code + '); entries only live in memory until the next restart.');
+    }
+  });
 }
 
 function adLookup(name) {
@@ -189,9 +195,17 @@ exports.start = function (opts) {
   AD.key = (process.env.THEAUDIODB_KEY || process.env.theaudiodb_key || '').trim();
   AD.dir = process.env.CACHE_DIR || path.join(appDir, 'cache');
   AD.interval = parseInt(process.env.THEAUDIODB_INTERVAL_MS || (AD.key === '123' ? '2100' : '700'), 10);
+  AD.log = log;
   if (AD.key) {
-    try { fs.mkdirSync(AD.dir, { recursive: true }); } catch (e) { log('[!] Cache directory not writable: ' + e.message); }
-    log('[+] TheAudioDB cache on /audiodb (cache dir ' + AD.dir + ')');
+    try { fs.mkdirSync(AD.dir, { recursive: true }); } catch (e) { /* checked below */ }
+    let state = 'writable';
+    try {
+      fs.accessSync(AD.dir, fs.constants.W_OK);
+    } catch (e) {
+      state = 'NOT writable (' + e.code + '), entries only live in memory';
+    }
+    log('[' + (state === 'writable' ? '+' : '!') + '] TheAudioDB cache on /audiodb: dir ' + AD.dir + ' ' + state +
+      ', ' + (AD.key === '123' ? 'test key' : 'own key') + ', min. ' + AD.interval + ' ms between requests');
   } else {
     log('[*] TheAudioDB cache off (THEAUDIODB_KEY not set).');
   }
